@@ -14,20 +14,25 @@ susceptibility proxy.** They are not flood depths, probabilities or modelled eve
 
 ## Current status
 
-Implemented: Checkpoint 1 and Checkpoint 2.
+Implemented: Checkpoints 1 to 4.
 
 - **Checkpoint 1 — Input Validation** (`loss_engine/validation.py`). Reads the exposure file and
   checks it against rules V1 to V11. A failed rule stops the run; nothing is ever corrected.
 - **Checkpoint 2 — Configuration** (`loss_engine/config.py`). Holds the parameters and the four
   default scenarios of the specification, each value with its source tag, and checks them against
   rules P1 to P9. An invalid configuration cannot be built.
-- **Next: Checkpoint 3 — Vulnerability Primitives.** Not started.
+- **Checkpoint 3 — Vulnerability Primitives** (`loss_engine/vulnerability.py`). Hazard score ->
+  curve position -> damage factor -> ceiling -> damage ratio, for one scenario.
+- **Checkpoint 4 — Building Financial Loss** (`loss_engine/building_loss.py`). Loss = `tiv_kes` ×
+  damage ratio, with `tiv_kes` as supplied, and the building-results table of specification 4.1
+  (one row per building, tier and scenario) without `run_id`.
+- **Next: Checkpoint 5 — Aggregation.** Not started.
 
-Nothing else is implemented. There is no vulnerability, damage or loss calculation, no
-aggregation, no EP analysis, and no AI, interface or human-decision step yet.
+Nothing else is implemented. There are no tier, class or portfolio totals, no EP analysis,
+no run record, and no AI, interface or human-decision step yet.
 
-Later checkpoints, in order: building loss -> aggregation -> EP analysis -> provenance
--> AI analysis -> human decision.
+Later checkpoints, in order: aggregation -> EP analysis -> provenance -> AI analysis
+-> human decision.
 
 ## Deterministic configuration
 

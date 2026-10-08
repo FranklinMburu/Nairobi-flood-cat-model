@@ -1,1 +1,1 @@
-"""Deterministic loss engine (specification 07). Checkpoint 1: input validation. Checkpoint 2: parameter and scenario configuration. No loss calculation yet."""
+"""Deterministic loss engine (specification 07). Checkpoint 1: input validation. Checkpoint 2: parameter and scenario configuration. Checkpoint 3: vulnerability primitives. Checkpoint 4: building financial loss. No aggregation yet."""
