@@ -1,0 +1,18 @@
+# Virtual environment
+.venv/
+
+# Python and test caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+
+# Generated outputs
+outputs/
+
+# Editor and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
