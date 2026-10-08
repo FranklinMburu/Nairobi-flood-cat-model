@@ -14,7 +14,7 @@ susceptibility proxy.** They are not flood depths, probabilities or modelled eve
 
 ## Current status
 
-Implemented: Checkpoints 1 to 4.
+Implemented: Checkpoints 1 to 5.
 
 - **Checkpoint 1 — Input Validation** (`loss_engine/validation.py`). Reads the exposure file and
   checks it against rules V1 to V11. A failed rule stops the run; nothing is ever corrected.
@@ -26,13 +26,14 @@ Implemented: Checkpoints 1 to 4.
 - **Checkpoint 4 — Building Financial Loss** (`loss_engine/building_loss.py`). Loss = `tiv_kes` ×
   damage ratio, with `tiv_kes` as supplied, and the building-results table of specification 4.1
   (one row per building, tier and scenario) without `run_id`.
-- **Next: Checkpoint 5 — Aggregation.** Not started.
+- **Checkpoint 5 — Portfolio Aggregation** (`loss_engine/aggregation.py`). Tier and
+  class × tier summaries of specification 4.2 and 4.3, built from the building results, and
+  output checks C1 to C8. A failed check stops the run.
 
-Nothing else is implemented. There are no tier, class or portfolio totals, no EP analysis,
-no run record, and no AI, interface or human-decision step yet.
+Nothing else is implemented. There are no return periods or EP analysis, no run record, and
+no AI, interface or human-decision step yet.
 
-Later checkpoints, in order: aggregation -> EP analysis -> provenance -> AI analysis
--> human decision.
+Later checkpoints, in order: EP analysis -> provenance -> AI analysis -> human decision.
 
 ## Deterministic configuration
 
@@ -65,7 +66,7 @@ docs/specifications/   Frozen engine specification (Revision 2)
 docs/decisions/        Frozen decision record (D-001 to D-005)
 docs/reference/        Organizer problem statement, dataset metadata, build guide
 data/                  Source data as supplied by the organizers, unchanged
-loss_engine/           Python package (currently: input validation and configuration)
+loss_engine/           Python package: validation, configuration, vulnerability, building loss, aggregation
 tests/                 Tests for the package
 PROVENANCE.md          Hashes and facts for every source file
 requirements-lock.txt  Exact dependency versions the tests passed with
