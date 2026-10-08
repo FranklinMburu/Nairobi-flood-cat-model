@@ -72,7 +72,7 @@ class TestAdapterConfig:
 
     def test_resolve_model_path_absolute(self):
         config = AdapterConfig()
-        abs_path = Path("C:/absolute/path/model.joblib")
+        abs_path = Path("/absolute/path/model.joblib")
         assert config.resolve_model_path(abs_path) == abs_path
 
     def test_resolve_model_path_relative(self):
