@@ -20,7 +20,8 @@ jobs:
       - name: Install pinned dependencies and the project
         run: |
           python -m pip install -r requirements-lock.txt
-          python -m pip install -e ".[adapter]" --no-deps
+          python -m pip install scikit-learn>=1.5 scipy>=1.13 rasterio>=1.4 openpyxl>=3.1 joblib>=1.4
+          python -m pip install -e . --no-deps
 
       - name: Run tests
         run: python -m pytest
