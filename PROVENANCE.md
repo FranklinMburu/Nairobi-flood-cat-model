@@ -57,3 +57,9 @@ All supplied by the hackathon organizers and unchanged.
 
 `Dataset_Metadata.docx` states a total TIV that the organizers have confirmed is a documentation
 error. Use the CSV values, not the metadata figure (D-001).
+
+## Model runs
+
+This file records the source files. The lineage of each model run (input hash, parameters,
+return-period mapping, code version, validation results and output digests) is in that run's own
+`outputs/<run_id>/run_record.json`, written by `loss_engine.run_record.write_run`.

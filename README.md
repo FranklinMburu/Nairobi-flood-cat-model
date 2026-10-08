@@ -14,7 +14,7 @@ susceptibility proxy.** They are not flood depths, probabilities or modelled eve
 
 ## Current status
 
-Implemented: Checkpoints 1 to 6.
+Implemented: Checkpoints 1 to 7.
 
 - **Checkpoint 1 — Input Validation** (`loss_engine/validation.py`). Reads the exposure file and
   checks it against rules V1 to V11. A failed rule stops the run; nothing is ever corrected.
@@ -32,11 +32,14 @@ Implemented: Checkpoints 1 to 6.
 - **Checkpoint 6 — Return Periods and EP / Loss Points** (`loss_engine/ep_curve.py`). The
   provisional D-004 return periods, AEP = 1 / T, and five EP / loss points per scenario read from
   the tier summary. See below.
+- **Checkpoint 7 — Provenance and Run Record** (`loss_engine/run_record.py`). `run_model` runs
+  Checkpoints 1 to 6 and returns the specification 4.4 run record, with `run_id` on every output
+  table; `write_run` saves it. See below.
 
-Nothing else is implemented. There is no EAL, PML or TVaR, no run record, and no AI, interface
-or human-decision step yet.
+Nothing else is implemented. There is no EAL, PML or TVaR, and no AI, interface or
+human-decision step yet.
 
-Later checkpoints, in order: provenance -> AI analysis -> human decision.
+Later checkpoints, in order: AI analysis -> human decision.
 
 ## Deterministic configuration
 
@@ -101,6 +104,48 @@ portfolio loss.
   calling it a PML would imply the loss's own return period has been estimated.
 - **TVaR — deferred.** It needs the loss distribution beyond 250 years, which does not exist.
 
+## Run record (Checkpoint 7)
+
+`run_model(exposure_path, config, mapping)` runs the whole chain unchanged and returns a
+`RunRecord` (specification 4.4) plus the four output tables, each with `run_id` as its first
+column. `write_run(result)` saves them, and returns `record_sha256`, the SHA-256 of the saved
+record file:
+
+```
+outputs/<run_id>/run_record.json      the run record
+outputs/<run_id>/building_results.csv
+outputs/<run_id>/tier_summary.csv
+outputs/<run_id>/class_summary.csv
+outputs/<run_id>/ep_points.csv
+```
+
+The record holds the input file name, SHA-256, row count and exact total TIV; `model_version`
+and the hashes of the frozen specification and decision record; the code version (package
+version, Git commit, uncommitted changes, or null when Git is unavailable); every parameter with
+its source tag, held once as the canonical form behind `parameter_set_id`; the return-period
+mapping and `mapping_id`; every V, P, RP and C rule result, including warnings; the tier summary
+and EP points; a SHA-256 digest of each output table; and fixed statements of the main
+assumptions.
+
+- **Identity.** `run_id` (`run-<UTC time>-<8 random hex characters>`) and `timestamp` identify
+  one execution and differ on every run. What was computed is identified by the input SHA-256,
+  `parameter_set_id`, `mapping_id`, `model_version` and the code version; two runs that share them
+  produce identical output digests.
+- **Output digests.** Each digest is the SHA-256 of a deterministic Checkpoint 4–6 calculation
+  table, written as canonical CSV, before `run_id` is added; `run_id` and `timestamp` are never
+  included. The saved CSVs carry `run_id` as their first column, as execution metadata only. To
+  check a saved CSV against its digest, remove that first `run_id` column and hash the remaining
+  canonical CSV text.
+- **Failures.** A run stopped by a failed rule still returns and saves its record, with status
+  `failed`, the failing rule as a `fail` entry in `validation_results` (for the re-check before
+  the EP points, stage `ep_points`, rule C5), and no loss outputs. When input validation fails,
+  `row_count` and `total_tiv_kes` are recorded as unavailable (null) rather than inferred from the
+  invalid input; the input remains identified by its filename and SHA-256. Stages that were never
+  reached have no entries: their rules are not recorded as passed or not run. An invalid
+  `ModelConfig` or `ReturnPeriodMapping` cannot be built at all, so it never reaches a run.
+- **Integrity.** `record_sha256` is computed after the file is written and is not stored inside
+  it. An existing run directory is never overwritten.
+
 ## Layout
 
 ```
@@ -108,7 +153,7 @@ docs/specifications/   Frozen engine specification (Revision 2)
 docs/decisions/        Frozen decision record (D-001 to D-005)
 docs/reference/        Organizer problem statement, dataset metadata, build guide
 data/                  Source data as supplied by the organizers, unchanged
-loss_engine/           Python package: validation, configuration, vulnerability, building loss, aggregation, EP points
+loss_engine/           Python package: validation, configuration, vulnerability, building loss, aggregation, EP points, run record
 tests/                 Tests for the package
 PROVENANCE.md          Hashes and facts for every source file
 requirements-lock.txt  Exact dependency versions the tests passed with
