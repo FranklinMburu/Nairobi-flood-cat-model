@@ -1,0 +1,32 @@
+{
+  "exposure_nairobi_with_hazard.csv": {
+    "path": "data/exposure_nairobi_with_hazard.csv",
+    "sha256": "b60aa96590d5a2e71509579d50c18d4ebd3557e26d2c60505f89d20bee69aa48",
+    "description": "Supplied exposure file with hazard scores"
+  },
+  "nairobi_pluvial_proxy_extreme.tif": {
+    "path": "data/nairobi_pluvial_proxy_extreme.tif",
+    "sha256": "dc83cf80780c7d83c0da803f3eb1bfeb6a7bcea8b9debe76d438a864a6466728",
+    "description": "Extreme hazard tier raster"
+  },
+  "nairobi_pluvial_proxy_severe.tif": {
+    "path": "data/nairobi_pluvial_proxy_severe.tif",
+    "sha256": "92d6d5ccc2930fcc40edb69d5ff3304a7ce60028586779075666845e01910b74",
+    "description": "Severe hazard tier raster"
+  },
+  "nairobi_pluvial_proxy_moderate.tif": {
+    "path": "data/nairobi_pluvial_proxy_moderate.tif",
+    "sha256": "2e6eba35dbbfec973591084f2979f0fbce24eee6af19365881118796c0de22ce",
+    "description": "Moderate hazard tier raster"
+  },
+  "nairobi_pluvial_proxy_occasional.tif": {
+    "path": "data/nairobi_pluvial_proxy_occasional.tif",
+    "sha256": "1a6f0e0d911ad5ccadc5345af514d5b01b43dedd1c1bfef8e4d07c5f0e710cb1",
+    "description": "Occasional hazard tier raster"
+  },
+  "nairobi_pluvial_proxy_common.tif": {
+    "path": "data/nairobi_pluvial_proxy_common.tif",
+    "sha256": "2071d44cf0ec9b06d240196e56bcd7915829d53cc6d186b033e89fce5afd1834",
+    "description": "Common hazard tier raster"
+  }
+}

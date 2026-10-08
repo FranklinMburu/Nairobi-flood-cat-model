@@ -10,10 +10,18 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest"]
+adapter = [
+    "scikit-learn>=1.5",
+    "scipy>=1.13",
+    "rasterio>=1.4",
+    "openpyxl>=3.1",
+    "joblib>=1.4",
+]
+geo = ["shapely>=2.0", "pyproj>=3.6"]
 
 [build-system]
 requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["loss_engine"]
+packages = ["loss_engine", "adapter"]

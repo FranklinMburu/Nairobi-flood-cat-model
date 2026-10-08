@@ -1,0 +1,6 @@
+{
+  "fx_rate_kes_usd": 130.0,
+  "fx_rate_source": "Central Bank of Kenya indicative rate",
+  "fx_rate_date": "2026-10-08",
+  "description": "KES per 1 USD. Override with --fx-rate CLI flag or ADAPTER_FX_RATE env var."
+}
