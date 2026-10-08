@@ -1,11 +1,24 @@
 # Virtual environment
 .venv/
 
+# Local environment files (may hold secrets)
+.env
+
 # Python and test caches
 __pycache__/
 *.py[cod]
 .pytest_cache/
 *.egg-info/
+
+# Python build output
+build/
+dist/
+
+# Coverage output
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
 
 # Generated outputs
 outputs/

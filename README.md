@@ -14,17 +14,44 @@ susceptibility proxy.** They are not flood depths, probabilities or modelled eve
 
 ## Current status
 
-- Repository bootstrap: complete.
-- Step 1, input validation (rules V1 to V11): present in `loss_engine/validation.py`, with tests.
-- Checkpoint 1, parameter and scenario configuration: present in `loss_engine/config.py`, with tests.
-  It holds the parameters and the four default scenarios of the specification, checks them
-  against rules P1 to P9, and gives each parameter set a deterministic `parameter_set_id`.
-- Nothing else is implemented. There is no vulnerability, damage or loss calculation, no
-  aggregation, no EP analysis, and no AI, interface or human-decision step yet.
+Implemented: Checkpoint 1 and Checkpoint 2.
 
-The engine is built one checkpoint at a time:
-input validation -> parameter configuration -> vulnerability primitives -> building loss
--> aggregation -> EP analysis -> provenance -> AI analysis -> human decision.
+- **Checkpoint 1 — Input Validation** (`loss_engine/validation.py`). Reads the exposure file and
+  checks it against rules V1 to V11. A failed rule stops the run; nothing is ever corrected.
+- **Checkpoint 2 — Configuration** (`loss_engine/config.py`). Holds the parameters and the four
+  default scenarios of the specification, each value with its source tag, and checks them against
+  rules P1 to P9. An invalid configuration cannot be built.
+- **Next: Checkpoint 3 — Vulnerability Primitives.** Not started.
+
+Nothing else is implemented. There is no vulnerability, damage or loss calculation, no
+aggregation, no EP analysis, and no AI, interface or human-decision step yet.
+
+Later checkpoints, in order: building loss -> aggregation -> EP analysis -> provenance
+-> AI analysis -> human decision.
+
+## Deterministic configuration
+
+Every configuration has a `parameter_set_id`: the SHA-256 of a fixed JSON text of every parameter
+value and source tag. The same parameters always give the same id, and any change gives a new one.
+No time, randomness or machine detail goes into it. The id will link each future loss result to
+the exact parameters that produced it.
+
+## Main modelling assumptions
+
+Each is stated and tagged in the frozen specification and decision record.
+
+- The hazard score is a relative susceptibility score, not a flood depth (D-002).
+- The score is placed on the published JRC Africa residential curve through one scale parameter,
+  H. H is an assumption with no Nairobi calibration; it is run at 2, 4 and 6 (D-005).
+- One curve shape is used for all four housing classes. Classes differ only through
+  structure-only damage ceilings, which are team assumptions, not Kenya-calibrated values (D-005).
+- `tiv_kes` is used exactly as supplied (D-001).
+
+## Out of scope by design
+
+Contents, business interruption, deductibles, limits and reinsurance; raster lookup (the
+pre-attached scores are used); and any randomness. Return periods (D-004, provisional) are
+applied only at the later EP checkpoint.
 
 ## Layout
 
@@ -36,6 +63,8 @@ data/                  Source data as supplied by the organizers, unchanged
 loss_engine/           Python package (currently: input validation and configuration)
 tests/                 Tests for the package
 PROVENANCE.md          Hashes and facts for every source file
+requirements-lock.txt  Exact dependency versions the tests passed with
+.github/workflows/     Continuous integration: runs the test suite
 ```
 
 Generated outputs belong in `outputs/`, which Git ignores.
@@ -53,12 +82,15 @@ line endings in `data/` and `docs/`.
 
 ## Setup and tests
 
-Requires Python 3.13 or newer. From the repository root, on Windows:
+Tested on Python 3.13. From the repository root, on Windows:
 
 ```
 python -m venv .venv
-.venv\Scripts\python -m pip install -e ".[dev]"
+.venv\Scripts\python -m pip install -r requirements-lock.txt
+.venv\Scripts\python -m pip install -e . --no-deps
 .venv\Scripts\python -m pytest
 ```
 
-On macOS or Linux use `.venv/bin/python` instead.
+On macOS or Linux use `.venv/bin/python` instead. `requirements-lock.txt` pins the exact
+versions the test suite passed with. GitHub Actions runs the same steps on every push and
+pull request (`.github/workflows/tests.yml`).
