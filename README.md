@@ -14,7 +14,7 @@ susceptibility proxy.** They are not flood depths, probabilities or modelled eve
 
 ## Current status
 
-Implemented: Checkpoints 1 to 5.
+Implemented: Checkpoints 1 to 6.
 
 - **Checkpoint 1 — Input Validation** (`loss_engine/validation.py`). Reads the exposure file and
   checks it against rules V1 to V11. A failed rule stops the run; nothing is ever corrected.
@@ -29,11 +29,14 @@ Implemented: Checkpoints 1 to 5.
 - **Checkpoint 5 — Portfolio Aggregation** (`loss_engine/aggregation.py`). Tier and
   class × tier summaries of specification 4.2 and 4.3, built from the building results, and
   output checks C1 to C8. A failed check stops the run.
+- **Checkpoint 6 — Return Periods and EP / Loss Points** (`loss_engine/ep_curve.py`). The
+  provisional D-004 return periods, AEP = 1 / T, and five EP / loss points per scenario read from
+  the tier summary. See below.
 
-Nothing else is implemented. There are no return periods or EP analysis, no run record, and
-no AI, interface or human-decision step yet.
+Nothing else is implemented. There is no EAL, PML or TVaR, no run record, and no AI, interface
+or human-decision step yet.
 
-Later checkpoints, in order: EP analysis -> provenance -> AI analysis -> human decision.
+Later checkpoints, in order: provenance -> AI analysis -> human decision.
 
 ## Deterministic configuration
 
@@ -57,7 +60,46 @@ Each is stated and tagged in the frozen specification and decision record.
 
 Contents, business interruption, deductibles, limits and reinsurance; raster lookup (the
 pre-attached scores are used); and any randomness. Return periods (D-004, provisional) are
-applied only at the later EP checkpoint.
+applied only after losses are computed (Checkpoint 6).
+
+## Return periods and EP / loss points (Checkpoint 6)
+
+Each hazard tier is assigned a return period T, and its annual exceedance probability is taken
+as AEP = 1 / T, stored as a fraction:
+
+| Tier | Return period | AEP |
+|---|---:|---:|
+| extreme | 10 years | 0.100 |
+| severe | 25 years | 0.040 |
+| moderate | 50 years | 0.020 |
+| occasional | 100 years | 0.010 |
+| common | 250 years | 0.004 |
+
+**These return periods are provisional assumptions, not observations.** They come from the
+organizers' reference dashboard and were not confirmed (D-004). The hazard files carry no
+event-frequency information: the five tiers are cuts through one susceptibility score (D-002).
+The mapping is held in one configurable table (`ReturnPeriodMapping`), with its own
+deterministic `mapping_id`, so it can be replaced without changing the loss engine.
+
+**What the output is:** a scenario-based EP / loss representation, constructed from five
+deterministic hazard tiers assigned provisional return periods. For each scenario there are
+exactly five points, each a modelled portfolio loss from Checkpoint 5 at an assigned return
+period. Under the reference scenario the loss rises from about KES 468m at the provisional
+10-year tier to about KES 5.10bn at the provisional 250-year tier.
+
+**What it is not:** a statistically calibrated, stochastic-event-set or Monte Carlo EP curve, or
+a flood-frequency model. Nothing is interpolated between the five points or extrapolated beyond
+them, and a tier's hazard return period is assumed, not shown, to be the return period of its
+portfolio loss.
+
+**Deferred metrics:**
+
+- **EAL — deferred.** The five points cover only AEP 0.004 to 0.1. Even the rigorous bounds they
+  allow leave the reference-scenario EAL anywhere between about KES 104m and 371m, so any single
+  figure would reflect the assumption chosen for the missing regions, not the data.
+- **PML — deferred.** A loss can only be read off at the five assumed hazard return periods;
+  calling it a PML would imply the loss's own return period has been estimated.
+- **TVaR — deferred.** It needs the loss distribution beyond 250 years, which does not exist.
 
 ## Layout
 
@@ -66,7 +108,7 @@ docs/specifications/   Frozen engine specification (Revision 2)
 docs/decisions/        Frozen decision record (D-001 to D-005)
 docs/reference/        Organizer problem statement, dataset metadata, build guide
 data/                  Source data as supplied by the organizers, unchanged
-loss_engine/           Python package: validation, configuration, vulnerability, building loss, aggregation
+loss_engine/           Python package: validation, configuration, vulnerability, building loss, aggregation, EP points
 tests/                 Tests for the package
 PROVENANCE.md          Hashes and facts for every source file
 requirements-lock.txt  Exact dependency versions the tests passed with
