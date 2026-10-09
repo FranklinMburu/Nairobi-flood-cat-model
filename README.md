@@ -15,7 +15,7 @@ susceptibility proxy.** They are not flood depths, probabilities or modelled eve
 
 ## Current status
 
-Implemented: Checkpoints 1 to 7.
+Implemented: Checkpoints 1 to 8.
 
 - **Checkpoint 1 — Input Validation** (`loss_engine/validation.py`). Reads the exposure file and
   checks it against rules V1 to V11. A failed rule stops the run; nothing is ever corrected.
@@ -37,10 +37,12 @@ Implemented: Checkpoints 1 to 7.
   Checkpoints 1 to 6 and returns the specification 4.4 run record, with `run_id` on every output
   table; `write_run` saves it. See below.
 
-Nothing else is implemented. There is no EAL, PML or TVaR, and no AI, interface or
-human-decision step yet.
+- **Checkpoint 8 — AI exposure extraction, human approval and workflow** (`ai_records.py`,
+  `ai_providers.py`, `exposure_extraction.py`, `approval.py`, `hazard_lookup.py`,
+  `exposure_assembly.py`, `workflow.py`, `demo.py`). A free-text submission becomes engine rows only
+  after deterministic verification and a recorded human approval. See below.
 
-Later checkpoints, in order: AI analysis -> human decision.
+There is no EAL, PML or TVaR, and no web interface or authentication.
 
 ## Deterministic configuration
 
@@ -62,8 +64,9 @@ Each is stated and tagged in the frozen specification and decision record.
 
 ## Out of scope by design
 
-Contents, business interruption, deductibles, limits and reinsurance; raster lookup (the
-pre-attached scores are used); and any randomness. Return periods (D-004, provisional) are
+Contents, business interruption, deductibles, limits and reinsurance (Checkpoint 8 lists them
+as unmodelled terms but never applies them); and any randomness. The supplied 600 buildings use
+their pre-attached scores; only new buildings from Checkpoint 8 are scored from the rasters. Return periods (D-004, provisional) are
 applied only after losses are computed (Checkpoint 6).
 
 ## Return periods and EP / loss points (Checkpoint 6)
@@ -147,6 +150,88 @@ assumptions.
 - **Integrity.** `record_sha256` is computed after the file is written and is not stored inside
   it. An existing run directory is never overwritten.
 
+## AI exposure extraction and approval workflow (Checkpoint 8)
+
+```
+document text -> AI extraction (or replay) -> extraction record -> deterministic verifier
+  -> human approval -> exposure rows -> raster hazard scores -> run_model (x3) -> comparison + workflow record
+```
+
+**Run the demonstration** (needs the `geo` extra for the rasters; it is in `requirements-lock.txt`):
+
+```
+.venv\Scripts\python -m loss_engine.demo                            # stops at "awaiting_approval"
+.venv\Scripts\python -m loss_engine.demo --approver "Your Name"     # approves with examples/demo_review.json and runs
+```
+
+Output goes to `outputs/workflow-<UTC time>/` (or `--out DIR`, which must not exist):
+`source_document.json`, `ai_extraction.json`, `verification_report.json`, `approval.json`,
+`account_exposure.csv`, `portfolio_with_account.csv`, `runs/<run_id>/…` for the baseline, the
+account alone and the portfolio with the account, `comparison.csv`, `ep_comparison.csv` and
+`workflow_record.json`.
+
+**Replay and live AI.** By default the AI step replays `examples/demo_replay_record.json`. That
+response was **written by hand** (provider `fixture`, model `hand-written-response`); no AI produced
+it, and every replayed record says `execution_mode: replay` with `replay_of` naming the recording.
+A replay is refused if the document, prompt or schema differs from the recording. To call Gemini
+instead, set `GEMINI_API_KEY` and pass `--gemini-model <model name>`; there is no default model.
+Without a key the run stops with a recorded "credentials unavailable" error. Tests and CI never
+call a provider. Any other provider (for example a local model) only has to implement the
+`AIProvider` protocol in `ai_records.py`.
+
+**What the AI may do.** Extract stated facts with an exact quote for each. It does not calculate
+losses, geocode, fill gaps or approve anything. The verifier (`exposure_extraction.py`) checks
+every quote against the source text and every number against its quote (meaning, currency, per
+building or total), and returns `valid_candidate`, `needs_review` or `rejected`.
+
+**Approval** (`approval.py`). A human decides `approve`, `reject` or `request_review`. An approval
+is refused unless the candidate was not rejected, every review flag is acknowledged by name, and
+every included item has a location, class, building count and KES value per building — from the
+verified candidate or entered by the reviewer as a correction with a reason. A total for several
+buildings is never split: the reviewer enters a per-building value or excludes the item. The
+approval records the hashes of the document, response, parsed candidate and verification report;
+if any changes, the approval is stale and nothing runs. The approver's name is not authenticated
+(`approver_verified` is always false).
+
+**Exposure rows** (`exposure_assembly.py`). One row per building, `loc_id`
+`SUB-<document hash>-<item>-<building>`, `synthetic` true, `tiv_kes` exactly as stated or entered
+(never area × cost, D-001). Location: a correction, else stated coordinates, else an exact match to
+one of the 24 organizer hotspots (a neighbourhood point, approximate [A]); otherwise the item
+cannot proceed. The origin of every value (AI quote, mapping rule, human, gazetteer) is recorded.
+
+**Hazard** (`hazard_lookup.py`). The five scores are read from the supplied rasters (floor-based
+cell, exact float32 values). It reproduces all 3,000 supplied scores. A building outside the
+rasters, or on a missing cell, stops the workflow; it is never scored 0.
+
+**Results.** The engine runs unchanged on the supplied portfolio, the account alone and the
+portfolio with the account. The marginal change is the difference of two engine results. The
+baseline reproduces specification 7.3 exactly.
+
+**Provenance** (`workflow_record.json`). It links the document id and hashes (and the original
+file's hash), the extraction id, provider, model, execution mode, prompt and schema versions and
+hashes, response hash and `replay_of`; the verification outcome and report hash; the approval
+id, file hash, approver and candidate hash; the three exposure files' hashes (equal to each run's
+`input_sha256`) and new `loc_id`s; the `raster_set_id` and raster hashes; each run's `run_id`,
+`record_sha256`, `parameter_set_id`, `mapping_id` and output digests; the unmodelled terms; and the
+assumption statements.
+
+**Upload boundary.** File upload and parsing (PDF, Excel, storage, HTTP) belong to the upload
+service, not this package. That service passes extracted text and the original file's identity:
+
+```python
+from loss_engine.workflow import submission_from_upload, extract_and_verify
+document = submission_from_upload(text, original_filename="schedule.pdf", original_file_sha256=sha, uploaded_by=user)
+stage = extract_and_verify(document, provider, load_gazetteer("data"))   # stage.status == "awaiting_approval"
+# ... a human decides with approval.decide(...), then workflow.run_approved(stage, approval, ...)
+```
+
+A structured file that is already in the Checkpoint 1 columns can go straight to `run_model`.
+
+**Limitations.** Synthetic portfolio; susceptibility proxy, not depth or probability; H = 4 with
+2 and 6 as sensitivity; provisional class ceilings and D-004 return periods; structural
+ground-up loss only; the EP output is not stochastic; the JRC curve is not Nairobi-calibrated;
+class mapping rules and gazetteer points are team assumptions [A]; no authentication.
+
 ## Layout
 
 ```
@@ -154,7 +239,9 @@ docs/specifications/   Frozen engine specification (Revision 2)
 docs/decisions/        Frozen decision record (D-001 to D-005)
 docs/reference/        Organizer problem statement, dataset metadata, build guide
 data/                  Source data as supplied by the organizers, unchanged
-loss_engine/           Python package: validation, configuration, vulnerability, building loss, aggregation, EP points, run record
+loss_engine/           Python package: validation, configuration, vulnerability, building loss, aggregation, EP points,
+                       run record, AI extraction, verification, approval, hazard lookup, workflow, demo
+examples/              Demonstration submission, hand-written replay fixture and review decisions
 tests/                 Tests for the package
 PROVENANCE.md          Hashes and facts for every source file
 requirements-lock.txt  Exact dependency versions the tests passed with

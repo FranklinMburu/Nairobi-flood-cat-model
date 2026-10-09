@@ -1,0 +1,31 @@
+{
+  "code_version": {
+    "git_commit": "947d4ffeb79ad82b04e1cded827f27367783e349",
+    "git_dirty": true,
+    "package_version": "0.1.0"
+  },
+  "created_at": "2026-10-09T09:00:00.000000Z",
+  "document_hashes": [
+    "5837483c21ed4cf0025284604146db10e2e2241f36b181a534aa87d439ea97f3"
+  ],
+  "document_ids": [
+    "doc-5837483c21ed4cf0"
+  ],
+  "error": null,
+  "execution_mode": "replay",
+  "extraction_id": "ext-20261009T090000Z-000f1f00",
+  "mode": "exposure",
+  "model": "hand-written-response",
+  "prompt_sha256": "88d3c794a489d1c0235623404441bccde5ea26efb808cbf70a6203c927e454f4",
+  "prompt_version": "exposure-prompt-1",
+  "provider": "fixture",
+  "record_format": "ai-extraction-1",
+  "replay_of": "ext-20261009T000000Z-00000000",
+  "request_id": null,
+  "response_sha256": "381ed25aaf52bc4ba554910dd0132a70055b4a354845866aaf1c6fe48a2e63e2",
+  "response_text": "{\n \"items\": [\n  {\n   \"item_id\": \"item-1\",\n   \"location\": {\n    \"text\": \"Kayole\",\n    \"lat\": null,\n    \"lon\": null,\n    \"status\": \"stated\",\n    \"quote\": \"Kayole\"\n   },\n   \"housing_class\": {\n    \"value\": \"concrete_rcc\",\n    \"status\": \"stated\",\n    \"quote\": \"reinforced concrete\",\n    \"mapping_rule\": null\n   },\n   \"building_count\": {\n    \"value\": 4,\n    \"status\": \"stated\",\n    \"quote\": \"four reinforced concrete houses\"\n   },\n   \"insured_value\": {\n    \"amount\": 6500000,\n    \"currency\": \"KES\",\n    \"basis\": \"per_building\",\n    \"quote\": \"each insured for KES 6,500,000\"\n   },\n   \"floor_area_m2\": {\n    \"value\": 90,\n    \"status\": \"stated\",\n    \"quote\": \"floor area 90 m2 per house\"\n   },\n   \"cost_per_m2\": {\n    \"amount\": null,\n    \"currency\": null,\n    \"status\": \"missing\",\n    \"quote\": null\n   },\n   \"unmodelled_terms\": []\n  },\n  {\n   \"item_id\": \"item-2\",\n   \"location\": {\n    \"text\": \"Kiambiu\",\n    \"lat\": -1.2822,\n    \"lon\": 36.8634,\n    \"status\": \"stated\",\n    \"quote\": \"-1.2822, 36.8634 (Kiambiu)\"\n   },\n   \"housing_class\": {\n    \"value\": \"permanent_masonry\",\n    \"status\": \"mapped\",\n    \"quote\": \"One masonry building\",\n    \"mapping_rule\": \"map-masonry\"\n   },\n   \"building_count\": {\n    \"value\": 1,\n    \"status\": \"stated\",\n    \"quote\": \"One masonry building\"\n   },\n   \"insured_value\": {\n    \"amount\": 3200000,\n    \"currency\": \"KES\",\n    \"basis\": \"total\",\n    \"quote\": \"sum insured KSh 3,200,000\"\n   },\n   \"floor_area_m2\": {\n    \"value\": null,\n    \"status\": \"missing\",\n    \"quote\": null\n   },\n   \"cost_per_m2\": {\n    \"amount\": null,\n    \"currency\": null,\n    \"status\": \"missing\",\n    \"quote\": null\n   },\n   \"unmodelled_terms\": [\n    {\n     \"kind\": \"deductible\",\n     \"text\": \"KES 50,000 per claim\",\n     \"quote\": \"Deductible KES 50,000 per claim\"\n    }\n   ]\n  },\n  {\n   \"item_id\": \"item-3\",\n   \"location\": {\n    \"text\": \"Dandora\",\n    \"lat\": null,\n    \"lon\": null,\n    \"status\": \"stated\",\n    \"quote\": \"Dandora\"\n   },\n   \"housing_class\": {\n    \"value\": \"informal_iron_sheet\",\n    \"status\": \"mapped\",\n    \"quote\": \"mabati structures\",\n    \"mapping_rule\": \"map-iron-sheet\"\n   },\n   \"building_count\": {\n    \"value\": 12,\n    \"status\": \"stated\",\n    \"quote\": \"twelve mabati structures\"\n   },\n   \"insured_value\": {\n    \"amount\": 9600000,\n    \"currency\": \"KES\",\n    \"basis\": \"total\",\n    \"quote\": \"total sum insured KES 9,600,000\"\n   },\n   \"floor_area_m2\": {\n    \"value\": null,\n    \"status\": \"missing\",\n    \"quote\": null\n   },\n   \"cost_per_m2\": {\n    \"amount\": null,\n    \"currency\": null,\n    \"status\": \"missing\",\n    \"quote\": null\n   },\n   \"unmodelled_terms\": [\n    {\n     \"kind\": \"business_interruption\",\n     \"text\": \"business interruption requested, not in schedule\",\n     \"quote\": \"Business interruption cover is requested but is not part of this schedule.\"\n    }\n   ]\n  }\n ]\n}",
+  "schema_sha256": "86046d4ad15c3c0c1af9891cbe11f0117b8f7d59e489949ef275739d898d719c",
+  "schema_version": "exposure-extraction-1",
+  "status": "ok",
+  "stop_reason": "hand-written"
+}

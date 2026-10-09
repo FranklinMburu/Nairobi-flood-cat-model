@@ -10,6 +10,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest"]
+geo = ["rasterio==1.5.2"]
 
 [build-system]
 requires = ["setuptools>=61"]
