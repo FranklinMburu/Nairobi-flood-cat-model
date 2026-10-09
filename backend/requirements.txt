@@ -1,0 +1,9 @@
+# Runtime dependencies for the Django API and the loss engine.
+# Pinned to the versions verified with this application. The Checkpoint 8
+# workflow also needs rasterio (the `geo` extra); requirements-lock.txt at the
+# repository root installs everything, including the upload service.
+Django==6.0.9
+africastalking==2.0.3
+numpy==2.5.3
+pandas==3.0.5
+rasterio==1.5.2

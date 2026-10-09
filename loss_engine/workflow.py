@@ -68,6 +68,11 @@ class ExtractionStage:
 
 def extract_and_verify(document: SourceDocument, provider: AIProvider, gazetteer, *, now: datetime | None = None) -> ExtractionStage:
     record = run_extraction(provider, build_exposure_request(document), now=now)
+    return load_stage(document, record, gazetteer)
+
+
+def load_stage(document: SourceDocument, record: AIExtractionRecord, gazetteer) -> ExtractionStage:
+    """Stage 1 from a saved document and extraction record. The verification is run again, deterministically."""
     report = verify_extraction(record, document)
     requirements = approval_requirements(record, report, gazetteer)
     if record.status != "ok":

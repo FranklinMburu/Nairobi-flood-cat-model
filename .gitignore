@@ -29,3 +29,11 @@ outputs/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Local authentication database (Django, backend/)
+db.sqlite3
+
+# Frontend packages and build output (frontend/)
+node_modules/
+frontend/dist/
+frontend/.vite/

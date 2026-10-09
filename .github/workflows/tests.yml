@@ -24,3 +24,6 @@ jobs:
 
       - name: Run tests
         run: python -m pytest
+
+      - name: Run Django API tests (accounts, portfolio, workflow)
+        run: python backend/manage.py test accounts portfolio workflow

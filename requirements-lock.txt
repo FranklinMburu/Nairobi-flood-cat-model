@@ -3,11 +3,14 @@
 # installed separately with `pip install -e . --no-deps`. Besides numpy, pandas
 # and pytest, it holds the optional extras and what they need: `geo` (rasterio,
 # for the hazard lookup), `adapter` (openpyxl, pdfplumber), `api` (fastapi,
-# uvicorn, python-multipart) and the API test tools (httpx2, reportlab).
+# uvicorn, python-multipart) and the API test tools (httpx2, reportlab), and the Django web backend
+# (Django, africastalking; see backend/requirements.txt).
 affine==3.0.1
+africastalking==2.0.3
 annotated-doc==0.0.5
 annotated-types==0.8.0
 anyio==4.15.1
+asgiref==3.12.1
 attrs==26.1.0
 certifi==2026.7.22
 cffi==2.1.1
@@ -15,6 +18,7 @@ charset-normalizer==3.5.2
 click==8.5.0
 colorama==0.4.6
 cryptography==50.0.2
+Django==6.0.9
 et_xmlfile==2.0.0
 fastapi==0.143.0
 h11==0.16.0
@@ -40,12 +44,18 @@ pypdfium2==5.14.0
 pytest==9.1.1
 python-dateutil==2.9.0.post0
 python-multipart==0.0.32
+PyYAML==6.0.3
 rasterio==1.5.2
 reportlab==5.0.1
+requests==2.34.2
+responses==0.26.3
+schema==0.7.8
 six==1.17.0
+sqlparse==0.6.0
 starlette==1.7.0
 truststore==0.10.4
 typing-inspection==0.4.4
 typing_extensions==4.16.0
 tzdata==2026.5
+urllib3==2.8.0
 uvicorn==0.54.0

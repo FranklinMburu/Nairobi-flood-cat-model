@@ -13,6 +13,60 @@ Hazard -> Exposure -> Vulnerability -> Financial Loss -> Portfolio Risk -> AI An
 hackathon organizers and do not describe real properties. **The hazard layers are a
 susceptibility proxy.** They are not flood depths, probabilities or modelled events.
 
+## Running the application
+
+The interface (`frontend/`, React + Vite) and its web API (`backend/`, Django) come from the
+DIRA application by DevFrancisLab (https://github.com/DevFrancisLab/dira, commit `20b40f9`),
+copied here without its older copy of the engine; they use this repository's `loss_engine`.
+
+| Process | Address | What it does |
+|---|---|---|
+| Django API | http://127.0.0.1:8000 | Accounts and sign-in, supplied portfolio, Checkpoint 8 workflow, recorded model runs |
+| Upload service | http://127.0.0.1:8001 | `api/main.py` (FastAPI): adapts CSV / XLSX / GeoJSON / PDF tables, runs the engine |
+| Interface | http://127.0.0.1:5173 | Proxies `/api` to Django; open this one |
+
+Setup once, from the repository root (Windows; on macOS or Linux use `.venv/bin/python`):
+
+```
+python -m venv .venv
+.venv\Scripts\python -m pip install -r requirements-lock.txt
+.venv\Scripts\python -m pip install -e . --no-deps
+cd frontend && npm ci && cd ..
+copy .env.example .env          # then set DJANGO_SECRET_KEY and ADAPTER_API_KEY (any long random strings)
+.venv\Scripts\python backend\manage.py migrate
+.venv\Scripts\python backend\manage.py createsuperuser
+```
+
+Start everything (Ctrl+C stops all three):
+
+```
+.venv\Scripts\python scripts\dev.py
+```
+
+Or start them separately, each in its own terminal: `backend\manage.py runserver 127.0.0.1:8000`,
+`python -m uvicorn api.main:app --port 8001` (with `ADAPTER_API_KEY` set), and `npm run dev` in
+`frontend/`. Sign-in needs a one-time code; with `EMAIL_HOST` empty it is printed in the Django
+terminal. Public registration is closed: accounts are created by an administrator.
+
+Screens: Overview, Risk Map, Exposure, Loss Analysis and Reports show the supplied portfolio from
+the engine. **Submissions** runs Checkpoint 8: submit the bundled example (replayed, labelled as
+such) or a text file, inspect the source, the extracted values with their quotes and every
+verification flag, record a decision (approve with acknowledgements, corrections and
+exclusions, request review, or reject), then run the model; the results, sampled hazard scores,
+value origins, unmodelled policy terms and full provenance come back from the server. **File
+upload** sends a structured file to the upload service through Django, which keeps the service
+key on the server. **Model runs** starts and lists recorded runs of the supplied portfolio.
+
+The workflow API (`backend/workflow/`) is a thin adapter: every rule and number comes from
+`loss_engine`. Its records are files under `outputs/workflow/`. Every workflow endpoint needs a
+signed-in session and POSTs need the CSRF token. Without `GEMINI_MODEL` and `GEMINI_API_KEY` on the
+server, only the bundled example can be processed. This is a local prototype: the approver is the
+signed-in account but the approval record does not verify identity, Django runs with its
+development server and `DEBUG`, and it is not hardened for public deployment.
+
+Tests: `python -m pytest` (engine, workflow, adapter, upload service) and
+`python backend\manage.py test accounts portfolio workflow` (web API).
+
 ## Current status
 
 Implemented: Checkpoints 1 to 8.
@@ -256,6 +310,10 @@ data/                  Source data as supplied by the organizers, unchanged
 loss_engine/           Python package: validation, configuration, vulnerability, building loss, aggregation, EP points,
                        run record, AI extraction, verification, approval, hazard lookup, workflow, demo
 examples/              Demonstration submission, hand-written replay fixture and review decisions
+backend/               Django web API (from DIRA): accounts, portfolio, workflow adapter
+frontend/              React interface (from DIRA)
+api/                   Upload service (FastAPI)
+scripts/dev.py         Starts the API, the upload service and the interface together
 adapter/               Exposure-file adapter (CSV / XLSX / GeoJSON -> Checkpoint 1 schema), with its tests
 tests/                 Tests for the package
 PROVENANCE.md          Hashes and facts for every source file
