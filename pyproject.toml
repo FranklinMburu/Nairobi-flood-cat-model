@@ -9,13 +9,19 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest"]
+dev = ["pytest", "httpx", "reportlab"]
 adapter = [
     "scikit-learn>=1.5",
     "scipy>=1.13",
     "rasterio>=1.4",
     "openpyxl>=3.1",
     "joblib>=1.4",
+    "pdfplumber>=0.11",
+]
+api = [
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "python-multipart>=0.0.9",
 ]
 geo = ["shapely>=2.0", "pyproj>=3.6"]
 
@@ -24,4 +30,7 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["loss_engine", "adapter"]
+packages = ["loss_engine", "adapter", "api"]
+
+[tool.setuptools.package-data]
+api = ["static/*.html"]

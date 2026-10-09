@@ -20,7 +20,8 @@ jobs:
       - name: Install pinned dependencies and the project
         run: |
           python -m pip install -r requirements-lock.txt
-          python -m pip install scikit-learn>=1.5 scipy>=1.13 rasterio>=1.4 openpyxl>=3.1 joblib>=1.4
+          python -m pip install "scikit-learn>=1.5" "scipy>=1.13" "rasterio>=1.4" "openpyxl>=3.1" "joblib>=1.4" "pdfplumber>=0.11"
+          python -m pip install "fastapi>=0.110" "uvicorn>=0.29" "python-multipart>=0.0.9" httpx reportlab
           python -m pip install -e . --no-deps
 
       - name: Run tests

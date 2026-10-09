@@ -152,11 +152,9 @@ def adapt_file(
     adapted_path = output_dir / "adapted.csv"
     report_path = output_dir / "adaptation_report.json"
 
-    # Step 1: Profile
-    profile = profile_file(input_path, config)
-
-    # Step 2: Read file
+    # Step 1-2: Read the file once, then profile it
     df, fmt = read_file(input_path)
+    profile = profile_file(input_path, config, preloaded=(df, fmt))
 
     # Step 3: Column mapping (placeholder for Phase 1 - use provided or identity)
     if column_mapping is None:

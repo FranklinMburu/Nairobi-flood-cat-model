@@ -1,4 +1,4 @@
-"""File profiling: read CSV/XLSX/GeoJSON and extract metadata."""
+"""File profiling: read CSV/XLSX/GeoJSON/PDF and extract metadata."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ from .config import AdapterConfig, DEFAULT_CONFIG
 class FileProfile:
     """Metadata profile of an input file."""
     sha256: str
-    format: str  # "csv", "xlsx", "geojson"
+    format: str  # "csv", "xlsx", "geojson", "pdf"
     n_rows: int
     n_cols: int
     headers: list[str]
@@ -175,17 +175,30 @@ def read_file(path: str | Path) -> tuple[pd.DataFrame, str]:
             rows.append(props)
         df = pd.DataFrame(rows)
         return df, "geojson"
+    elif suffix == ".pdf":
+        from .pdf_tables import extract_table  # lazy: needs the adapter extra
+
+        return extract_table(path), "pdf"
     else:
         raise ValueError(f"Unsupported file format: {suffix}")
 
 
-def profile_file(path: str | Path, config: AdapterConfig | None = None) -> FileProfile:
-    """Profile a file and return metadata."""
+def profile_file(
+    path: str | Path,
+    config: AdapterConfig | None = None,
+    *,
+    preloaded: tuple[pd.DataFrame, str] | None = None,
+) -> FileProfile:
+    """Profile a file and return metadata.
+
+    `preloaded` is an already-read (DataFrame, format) pair from read_file, so
+    the file is parsed once (a PDF parse is slow).
+    """
     config = config or DEFAULT_CONFIG
     path = Path(path)
     raw = path.read_bytes()
     sha256 = _sha256_bytes(raw)
-    df, fmt = read_file(path)
+    df, fmt = preloaded if preloaded is not None else read_file(path)
 
     headers = list(df.columns)
     dtypes = {c: str(df[c].dtype) for c in headers}
@@ -246,7 +259,7 @@ def profile_file(path: str | Path, config: AdapterConfig | None = None) -> FileP
             # Need to warn that polygons require geo extra
             pass
 
-    warnings = []
+    warnings = list(df.attrs.get("notes", [])) if fmt == "pdf" else []
     if fmt == "geojson" and geojson_polygon_count > 0:
         warnings.append(
             f"File contains {geojson_polygon_count} polygon(s); centroid extraction requires optional 'geo' extra"

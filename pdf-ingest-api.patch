@@ -1,0 +1,1460 @@
+diff --git a/.github/workflows/tests.yml b/.github/workflows/tests.yml
+index daa3802..b908360 100644
+--- a/.github/workflows/tests.yml
++++ b/.github/workflows/tests.yml
+@@ -20,7 +20,8 @@ jobs:
+       - name: Install pinned dependencies and the project
+         run: |
+           python -m pip install -r requirements-lock.txt
+-          python -m pip install scikit-learn>=1.5 scipy>=1.13 rasterio>=1.4 openpyxl>=3.1 joblib>=1.4
++          python -m pip install "scikit-learn>=1.5" "scipy>=1.13" "rasterio>=1.4" "openpyxl>=3.1" "joblib>=1.4" "pdfplumber>=0.11"
++          python -m pip install "fastapi>=0.110" "uvicorn>=0.29" "python-multipart>=0.0.9" httpx reportlab
+           python -m pip install -e . --no-deps
+ 
+       - name: Run tests
+diff --git a/README.md b/README.md
+index c62cc96..d895e12 100644
+--- a/README.md
++++ b/README.md
+@@ -188,3 +188,19 @@ python -m venv .venv
+ On macOS or Linux use `.venv/bin/python` instead. `requirements-lock.txt` pins the exact
+ versions the test suite passed with. GitHub Actions runs the same steps on every push and
+ pull request (`.github/workflows/tests.yml`).
++
++## Ingest API (PDF, CSV, XLSX, GeoJSON)
++
++```
++pip install -e ".[adapter,api]" --no-deps   # plus the extras' dependencies
++export ADAPTER_API_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
++uvicorn api.main:app          # from the repo root; open http://localhost:8000/
++```
++
++- `POST /adapt` adapts a file and returns the adapted CSV and the adaptation report.
++- `POST /run` adapts the file, then runs the deterministic loss engine and returns its tables. The API never computes a loss itself.
++- Every request needs the `X-API-Key` header. The server refuses to start without `ADAPTER_API_KEY`.
++- Form fields: `file`, `synthetic` (`true`/`false`; required unless the file has a `synthetic` column), `fx_rate` (0 to 1000), `accept_uncertain`.
++- PDFs must contain a real table (no OCR for scans), at most 50 pages. The largest table is used and tables continuing across pages are joined. PDF headers are matched to canonical names through a synonym map (`adapter/pdf_tables.py`); each rename is listed in the report warnings. The synonym map applies to PDFs only.
++- The five `hazard_score_*` columns must be in the file; they are not derived from the rasters yet.
++- Limits: 10 MB upload, type detected from content (not filename), temp files deleted after each request, no server paths in responses.
+diff --git a/adapter/__init__.py b/adapter/__init__.py
+index 7676615..2529039 100644
+--- a/adapter/__init__.py
++++ b/adapter/__init__.py
+@@ -1,6 +1,6 @@
+ """Nairobi Flood Model Data Adapter.
+ 
+-Transforms arbitrary exposure files (CSV, XLSX, GeoJSON) into the canonical
++Transforms arbitrary exposure files (CSV, XLSX, GeoJSON, PDF tables) into the canonical
+ schema required by the deterministic loss engine, with full audit trail.
+ """
+ 
+@@ -11,6 +11,7 @@ from .pipeline import adapt_file, AdaptationResult
+ from .profile import profile_file, FileProfile
+ from .normalize import normalize_values, verify_v7_order
+ from .report import AdaptationReport, build_report
++from .pdf_tables import extract_table
+ 
+ __version__ = "1.0.0"
+ 
+@@ -26,4 +27,5 @@ __all__ = [
+     "verify_v7_order",
+     "AdaptationReport",
+     "build_report",
++    "extract_table",
+ ]
+\ No newline at end of file
+diff --git a/adapter/pdf_tables.py b/adapter/pdf_tables.py
+new file mode 100644
+index 0000000..4d691b5
+--- /dev/null
++++ b/adapter/pdf_tables.py
+@@ -0,0 +1,170 @@
++"""PDF table extraction for the adapter.
++
++Reads the largest table in a text-based PDF and returns it as an all-string
++DataFrame that matches what the CSV reader produces. Scanned (image-only) PDFs
++have no text layer, so they yield no tables and raise NoTableFound; there is
++no OCR.
++
++Header synonyms (PDF_SYNONYM_MAP) are applied to PDF headers ONLY. Every
++rename is recorded in ``df.attrs["notes"]``; profile_file copies those notes
++into the profile warnings. Known limitation: the adaptation report still lists
++the resulting column mappings with method="exact".
++"""
++
++from __future__ import annotations
++
++import re
++from pathlib import Path
++
++import pandas as pd
++
++MAX_PDF_PAGES = 50
++MAX_TABLE_ROWS = 50_000
++
++
++class NoTableFound(ValueError):
++    """The PDF contains no extractable table (for example a scanned PDF)."""
++
++
++class PdfUnreadable(ValueError):
++    """The file starts like a PDF but cannot be parsed (corrupt or encrypted)."""
++
++
++class PdfLimitExceeded(ValueError):
++    """The PDF is larger or more complex than the configured limits."""
++
++
++PDF_SYNONYM_MAP = {
++    "latitude": "lat",
++    "longitude": "lon",
++    "long": "lon",
++    "lng": "lon",
++    "id": "loc_id",
++    "location_id": "loc_id",
++    "ref": "loc_id",
++    "construction": "housing_class",
++    "building_type": "housing_class",
++    "housing_type": "housing_class",
++    "class": "housing_class",
++    "floor_area": "floor_area_m2",
++    "area_m2": "floor_area_m2",
++    "gfa": "floor_area_m2",
++    "cost_per_m2": "cost_per_m2_kes",
++    "rate_per_m2": "cost_per_m2_kes",
++    "tiv": "tiv_kes",
++    "sum_insured": "tiv_kes",
++    "total_insured_value": "tiv_kes",
++}
++
++
++def _cell(value) -> str:
++    """None -> "", everything else a stripped string with newlines collapsed."""
++    if value is None:
++        return ""
++    return re.sub(r"\s*\n\s*", " ", str(value)).strip()
++
++
++def _clean_headers(raw_headers: list[str]) -> tuple[list[str], list[str]]:
++    """snake_case the headers; blank -> col_N; duplicates -> _2, _3. Returns (headers, notes)."""
++    seen: set[str] = set()
++    cleaned_headers: list[str] = []
++    notes: list[str] = []
++    for idx, raw in enumerate(raw_headers):
++        base = re.sub(r"[^a-z0-9]+", "_", raw.lower()).strip("_")
++        if not base:
++            base = f"col_{idx}"
++            notes.append(f"Blank header at position {idx} named '{base}'")
++        name, suffix = base, 2
++        while name in seen:
++            name = f"{base}_{suffix}"
++            suffix += 1
++        if name != base:
++            notes.append(f"Duplicate header '{base}' renamed '{name}'")
++        seen.add(name)
++        cleaned_headers.append(name)
++    return cleaned_headers, notes
++
++
++def _apply_synonyms(headers: list[str]) -> tuple[list[str], list[str]]:
++    """Rename synonym headers to canonical names. Returns (headers, notes)."""
++    out = list(headers)
++    taken = set(out)
++    notes: list[str] = []
++    for i, name in enumerate(headers):
++        target = PDF_SYNONYM_MAP.get(name)
++        if target is None:
++            continue
++        if "usd" in name.split("_"):
++            notes.append(f"Skipped synonym '{name}' -> '{target}': USD column")
++        elif target in taken:
++            notes.append(f"Skipped synonym '{name}' -> '{target}': target already present")
++        else:
++            out[i] = target
++            taken.discard(name)
++            taken.add(target)
++            notes.append(f"Header '{name}' mapped to '{target}'")
++    return out, notes
++
++
++def _tables_per_page(path: Path) -> list[list[list[list[str]]]]:
++    """Raw tables for every page: pages -> tables -> rows -> cleaned cell strings."""
++    import pdfplumber  # lazy: importing adapter must work without the adapter extra
++
++    try:
++        with pdfplumber.open(path) as pdf:
++            if len(pdf.pages) > MAX_PDF_PAGES:
++                raise PdfLimitExceeded(f"PDF has more than {MAX_PDF_PAGES} pages")
++            pages = []
++            for page in pdf.pages:
++                tables = []
++                for table in page.extract_tables() or []:
++                    if table and table[0]:
++                        ncols = len(table[0])
++                        rows = [[_cell(c) for c in row] for row in table]
++                        tables.append([(r + [""] * ncols)[:ncols] for r in rows])
++                pages.append(tables)
++            return pages
++    except PdfLimitExceeded:
++        raise
++    except Exception as exc:  # pdfminer raises many types for corrupt/encrypted files
++        raise PdfUnreadable("Could not read the PDF (corrupt or encrypted)") from exc
++
++
++def _candidates(path: Path) -> list[dict]:
++    """All tables in the PDF; tables continuing across consecutive pages are joined."""
++    candidates: list[dict] = []
++    current: dict | None = None
++    for page_no, tables in enumerate(_tables_per_page(path)):
++        for pos, rows in enumerate(tables):
++            ncols = len(rows[0])
++            continues = (
++                pos == 0
++                and current is not None
++                and current["last_page"] == page_no - 1
++                and current["at_page_end"]
++                and current["ncols"] == ncols
++            )
++            if continues:
++                current["rows"].extend(rows[1:] if rows[0] == current["header"] else rows)
++            else:
++                current = {"header": rows[0], "rows": rows[1:], "ncols": ncols}
++                candidates.append(current)
++            current["last_page"] = page_no
++            current["at_page_end"] = pos == len(tables) - 1
++            if len(current["rows"]) > MAX_TABLE_ROWS:
++                raise PdfLimitExceeded(f"Table has more than {MAX_TABLE_ROWS} rows")
++    return candidates
++
++
++def extract_table(path: str | Path) -> pd.DataFrame:
++    """Return the largest table (by rows x columns) in the PDF as an all-string DataFrame."""
++    candidates = [c for c in _candidates(Path(path)) if c["rows"]]
++    if not candidates:
++        raise NoTableFound("No tables found in PDF")
++    best = max(candidates, key=lambda c: (len(c["rows"]) + 1) * c["ncols"])
++
++    headers, notes = _clean_headers(best["header"])
++    headers, synonym_notes = _apply_synonyms(headers)
++    df = pd.DataFrame(best["rows"], columns=headers, dtype=str)
++    df.attrs["notes"] = notes + synonym_notes
++    return df
+diff --git a/adapter/pipeline.py b/adapter/pipeline.py
+index a40bfce..40f93e3 100644
+--- a/adapter/pipeline.py
++++ b/adapter/pipeline.py
+@@ -152,11 +152,9 @@ def adapt_file(
+     adapted_path = output_dir / "adapted.csv"
+     report_path = output_dir / "adaptation_report.json"
+ 
+-    # Step 1: Profile
+-    profile = profile_file(input_path, config)
+-
+-    # Step 2: Read file
++    # Step 1-2: Read the file once, then profile it
+     df, fmt = read_file(input_path)
++    profile = profile_file(input_path, config, preloaded=(df, fmt))
+ 
+     # Step 3: Column mapping (placeholder for Phase 1 - use provided or identity)
+     if column_mapping is None:
+diff --git a/adapter/profile.py b/adapter/profile.py
+index 08014cf..3ae0e92 100644
+--- a/adapter/profile.py
++++ b/adapter/profile.py
+@@ -1,4 +1,4 @@
+-"""File profiling: read CSV/XLSX/GeoJSON and extract metadata."""
++"""File profiling: read CSV/XLSX/GeoJSON/PDF and extract metadata."""
+ 
+ from __future__ import annotations
+ 
+@@ -20,7 +20,7 @@ from .config import AdapterConfig, DEFAULT_CONFIG
+ class FileProfile:
+     """Metadata profile of an input file."""
+     sha256: str
+-    format: str  # "csv", "xlsx", "geojson"
++    format: str  # "csv", "xlsx", "geojson", "pdf"
+     n_rows: int
+     n_cols: int
+     headers: list[str]
+@@ -175,17 +175,30 @@ def read_file(path: str | Path) -> tuple[pd.DataFrame, str]:
+             rows.append(props)
+         df = pd.DataFrame(rows)
+         return df, "geojson"
++    elif suffix == ".pdf":
++        from .pdf_tables import extract_table  # lazy: needs the adapter extra
++
++        return extract_table(path), "pdf"
+     else:
+         raise ValueError(f"Unsupported file format: {suffix}")
+ 
+ 
+-def profile_file(path: str | Path, config: AdapterConfig | None = None) -> FileProfile:
+-    """Profile a file and return metadata."""
++def profile_file(
++    path: str | Path,
++    config: AdapterConfig | None = None,
++    *,
++    preloaded: tuple[pd.DataFrame, str] | None = None,
++) -> FileProfile:
++    """Profile a file and return metadata.
++
++    `preloaded` is an already-read (DataFrame, format) pair from read_file, so
++    the file is parsed once (a PDF parse is slow).
++    """
+     config = config or DEFAULT_CONFIG
+     path = Path(path)
+     raw = path.read_bytes()
+     sha256 = _sha256_bytes(raw)
+-    df, fmt = read_file(path)
++    df, fmt = preloaded if preloaded is not None else read_file(path)
+ 
+     headers = list(df.columns)
+     dtypes = {c: str(df[c].dtype) for c in headers}
+@@ -246,7 +259,7 @@ def profile_file(path: str | Path, config: AdapterConfig | None = None) -> FileP
+             # Need to warn that polygons require geo extra
+             pass
+ 
+-    warnings = []
++    warnings = list(df.attrs.get("notes", [])) if fmt == "pdf" else []
+     if fmt == "geojson" and geojson_polygon_count > 0:
+         warnings.append(
+             f"File contains {geojson_polygon_count} polygon(s); centroid extraction requires optional 'geo' extra"
+diff --git a/adapter/run_adaptive.py b/adapter/run_adaptive.py
+index 78fce36..2f59435 100644
+--- a/adapter/run_adaptive.py
++++ b/adapter/run_adaptive.py
+@@ -7,6 +7,7 @@ import shutil
+ import sys
+ from pathlib import Path
+ 
++from adapter.config import AdapterConfig
+ from adapter.pipeline import adapt_file
+ from loss_engine.run_record import run_model, write_run, RunResult
+ from loss_engine.config import default_config, ModelConfig
+@@ -60,7 +61,7 @@ def main(argv: list[str] | None = None) -> int:
+         synthetic=(args.synthetic.lower() == "true") if args.synthetic else None,
+         fx_rate=args.fx_rate,
+         accept_uncertain=args.accept_uncertain,
+-        config_path=args.config,
++        config=AdapterConfig.load(config_path=args.config),
+     )
+ 
+     if adapter_result.status == "refused":
+diff --git a/adapter/tests/test_pdf_tables.py b/adapter/tests/test_pdf_tables.py
+new file mode 100644
+index 0000000..84a9249
+--- /dev/null
++++ b/adapter/tests/test_pdf_tables.py
+@@ -0,0 +1,137 @@
++"""PDF table extraction and its use through the adapter pipeline."""
++
++from __future__ import annotations
++
++import pytest
++
++from adapter.pdf_tables import MAX_PDF_PAGES, NoTableFound, PdfLimitExceeded, PdfUnreadable, extract_table
++from adapter.pipeline import adapt_file
++from adapter.profile import profile_file, read_file
++from conftest import exposure_rows, make_pdf, make_text_pdf
++
++
++def test_clean_table(pdf_path):
++    rows = exposure_rows(4)
++    df = extract_table(pdf_path(make_pdf([rows])))
++    assert list(df.columns) == rows[0]
++    assert len(df) == 4
++    assert df.iloc[0]["loc_id"] == "NBO-0000"
++    assert all(str(t) in ("str", "string", "object") or "str" in str(t).lower() for t in df.dtypes)
++
++
++def test_synonym_headers_mapped_and_recorded(pdf_path):
++    data = [["Location ID", "Latitude", "Longitude", "Building Type", "Sum Insured"], ["N1", "-1.3", "36.8", "concrete_rcc", "5"]]
++    df = extract_table(pdf_path(make_pdf([data])))
++    assert list(df.columns) == ["loc_id", "lat", "lon", "housing_class", "tiv_kes"]
++    notes = " ".join(df.attrs["notes"])
++    assert "'tiv' " not in notes and "sum_insured" in notes and "tiv_kes" in notes
++
++
++def test_multiline_and_symbol_headers_cleaned(pdf_path):
++    data = [["Loc\nID", "Cost per m2 (KES)", "Lat/Long"], ["N1", "100", "x"]]
++    df = extract_table(pdf_path(make_pdf([data])))
++    assert list(df.columns) == ["loc_id", "cost_per_m2_kes", "lat_long"]
++
++
++def test_blank_and_duplicate_headers(pdf_path):
++    data = [["loc_id", "", "lat", "lat"], ["N1", "x", "1", "2"]]
++    df = extract_table(pdf_path(make_pdf([data])))
++    assert list(df.columns) == ["loc_id", "col_1", "lat", "lat_2"]
++
++
++def test_empty_cell_is_empty_string_not_none_or_nan(pdf_path):
++    data = [["loc_id", "lat", "lon"], ["N1", "", "36.8"]]
++    df = extract_table(pdf_path(make_pdf([data])))
++    assert df.iloc[0]["lat"] == ""
++
++
++def test_synonym_collision_skipped(pdf_path):
++    data = [["tiv", "tiv_kes", "loc_id"], ["1", "2", "N1"]]
++    df = extract_table(pdf_path(make_pdf([data])))
++    assert list(df.columns) == ["tiv", "tiv_kes", "loc_id"]
++    assert any("target already present" in n for n in df.attrs["notes"])
++
++
++def test_two_synonyms_for_same_target_only_first_applied(pdf_path):
++    data = [["id", "ref", "lat"], ["1", "2", "3"]]
++    df = extract_table(pdf_path(make_pdf([data])))
++    assert list(df.columns) == ["loc_id", "ref", "lat"]
++
++
++def test_usd_columns_never_mapped(pdf_path):
++    data = [["loc_id", "tiv_usd"], ["N1", "10"]]
++    df = extract_table(pdf_path(make_pdf([data])))
++    assert "tiv_usd" in df.columns and "tiv_kes" not in df.columns
++
++
++def test_largest_table_wins_over_cover_table(pdf_path):
++    cover = [["item", "value"], ["Insured", "Acme Ltd"]]
++    data = exposure_rows(5)
++    df = extract_table(pdf_path(make_pdf([cover, data], page_break_between=False)))
++    assert list(df.columns) == data[0] and len(df) == 5
++
++
++def test_multipage_continuation_with_repeated_header(pdf_path):
++    rows = [["loc_id", "lat", "lon"]] + [[f"N{i}", "-1.3", "36.8"] for i in range(150)]
++    df = extract_table(pdf_path(make_pdf([rows], repeat_rows=1, font_size=12)))
++    assert len(df) == 150 and df["loc_id"].is_unique
++
++
++def test_multipage_continuation_without_header(pdf_path):
++    rows = [["loc_id", "lat", "lon"]] + [[f"N{i}", "-1.3", "36.8"] for i in range(150)]
++    df = extract_table(pdf_path(make_pdf([rows], repeat_rows=0, font_size=12)))
++    assert len(df) == 150 and df["loc_id"].is_unique
++
++
++def test_text_only_pdf_raises_no_table(pdf_path):
++    with pytest.raises(NoTableFound):
++        extract_table(pdf_path(make_text_pdf()))
++
++
++def test_over_page_limit_raises_not_truncates(pdf_path):
++    tables = [[["a", "b"], ["1", "2"]]] * (MAX_PDF_PAGES + 1)
++    with pytest.raises(PdfLimitExceeded):
++        extract_table(pdf_path(make_pdf(tables)))
++
++
++def test_corrupt_pdf_raises_unreadable(pdf_path):
++    with pytest.raises(PdfUnreadable):
++        extract_table(pdf_path(b"%PDF-1.4 this is not really a pdf"))
++
++
++def test_read_file_dispatches_pdf(pdf_path):
++    df, fmt = read_file(pdf_path(make_pdf([exposure_rows(3)])))
++    assert fmt == "pdf" and len(df) == 3
++
++
++def test_profile_carries_notes_as_warnings(pdf_path):
++    data = [["Latitude", "Longitude"], ["-1.3", "36.8"]]
++    profile = profile_file(pdf_path(make_pdf([data])))
++    assert profile.format == "pdf"
++    assert any("mapped to 'lat'" in w for w in profile.warnings)
++
++
++def test_pdf_through_adapter_is_accepted(pdf_path, tmp_path):
++    rows = exposure_rows(6)
++    result = adapt_file(pdf_path(make_pdf([rows])), tmp_path / "out")
++    assert result.status == "accepted", result.report.refusal_reasons
++    assert result.adapted_path.exists()
++    assert result.report.original_file["profile"]["format"] == "pdf"
++
++
++def test_pdf_with_synonym_headers_through_adapter(pdf_path, tmp_path):
++    rows = exposure_rows(6)
++    rename = {"loc_id": "Location ID", "lat": "Latitude", "lon": "Longitude", "housing_class": "Construction",
++              "floor_area_m2": "Floor Area", "cost_per_m2_kes": "Rate per m2", "tiv_kes": "Sum Insured"}
++    rows[0] = [rename.get(h, h) for h in rows[0]]
++    result = adapt_file(pdf_path(make_pdf([rows])), tmp_path / "out")
++    assert result.status == "accepted", result.report.refusal_reasons
++
++
++def test_pdf_missing_required_field_is_refused_not_guessed(pdf_path, tmp_path):
++    rows = exposure_rows(4)
++    drop = rows[0].index("tiv_kes")
++    rows = [[c for i, c in enumerate(r) if i != drop] for r in rows]
++    result = adapt_file(pdf_path(make_pdf([rows])), tmp_path / "out")
++    assert result.status == "refused"
++    assert any("tiv_kes" in r for r in result.report.refusal_reasons)
+diff --git a/api/__init__.py b/api/__init__.py
+new file mode 100644
+index 0000000..6351bf1
+--- /dev/null
++++ b/api/__init__.py
+@@ -0,0 +1,5 @@
++"""Nairobi Flood Model ingest API."""
++
++from __future__ import annotations
++
++__version__ = "1.0.0"
+diff --git a/api/main.py b/api/main.py
+new file mode 100644
+index 0000000..9e333cf
+--- /dev/null
++++ b/api/main.py
+@@ -0,0 +1,253 @@
++"""FastAPI ingest API: upload an exposure file (PDF table, CSV, XLSX, GeoJSON),
++adapt it to the canonical schema, and optionally run the deterministic loss engine.
++
++The API layer never computes or alters a loss value: /run only calls
++loss_engine.run_record.run_model on the adapted CSV and returns its outputs.
++
++Start:  ADAPTER_API_KEY=<secret> uvicorn api.main:app   (from the repo root)
++"""
++
++from __future__ import annotations
++
++import hashlib
++import io
++import json
++import logging
++import math
++import os
++import secrets
++import tempfile
++import time
++import zipfile
++from contextlib import asynccontextmanager
++from pathlib import Path
++
++from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Security, UploadFile
++from fastapi.responses import FileResponse, JSONResponse
++from fastapi.security import APIKeyHeader
++
++from adapter.config import AdapterConfig
++from adapter.pipeline import AdaptationResult, adapt_file
++
++logger = logging.getLogger("nairobi_api")
++
++MAX_UPLOAD_BYTES = 10 * 1024 * 1024
++MAX_XLSX_UNCOMPRESSED_BYTES = 100 * 1024 * 1024
++MAX_BUILDING_ROWS = 1000
++REPO_ROOT = Path(__file__).resolve().parents[1]
++STATIC_DIR = Path(__file__).resolve().parent / "static"
++
++api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
++
++
++@asynccontextmanager
++async def lifespan(app: FastAPI):
++    key = os.environ.get("ADAPTER_API_KEY", "")
++    if not key:
++        raise RuntimeError("ADAPTER_API_KEY must be set (any long random string you choose)")
++    app.state.api_key = key
++    yield
++
++
++app = FastAPI(title="Nairobi Flood Model ingest API", version="1.0.0", lifespan=lifespan)
++
++
++def require_key(request: Request, key: str | None = Security(api_key_header)) -> None:
++    expected: str = request.app.state.api_key
++    if not key or not secrets.compare_digest(key.encode("utf-8"), expected.encode("utf-8")):
++        raise HTTPException(status_code=401, detail="Missing or invalid X-API-Key")
++
++
++# --- Upload handling -------------------------------------------------------------
++
++
++def _read_upload(upload: UploadFile) -> bytes:
++    """Read the body in chunks and stop at the size cap."""
++    chunks, total = [], 0
++    while True:
++        chunk = upload.file.read(64 * 1024)
++        if not chunk:
++            break
++        total += len(chunk)
++        if total > MAX_UPLOAD_BYTES:
++            raise HTTPException(status_code=413, detail="File exceeds the 10 MB limit")
++        chunks.append(chunk)
++    return b"".join(chunks)
++
++
++def _sniff_format(raw: bytes) -> str:
++    """Detect the type from content only; the client filename and Content-Type are ignored."""
++    if raw.startswith(b"%PDF-"):
++        return "pdf"
++    if raw.startswith(b"PK"):
++        return "xlsx"
++    if raw.lstrip().startswith(b"{"):
++        return "geojson"
++    try:
++        text = raw.decode("utf-8")
++    except UnicodeDecodeError:
++        return "unknown"
++    return "unknown" if "\x00" in text else "csv"
++
++
++def _check_xlsx(raw: bytes) -> None:
++    try:
++        with zipfile.ZipFile(io.BytesIO(raw)) as zf:
++            names = set(zf.namelist())
++            if "xl/workbook.xml" not in names:
++                raise ValueError("not a workbook")
++            if sum(i.file_size for i in zf.infolist()) > MAX_XLSX_UNCOMPRESSED_BYTES:
++                raise HTTPException(status_code=413, detail="Workbook is too large when unpacked")
++    except HTTPException:
++        raise
++    except Exception:
++        raise HTTPException(status_code=415, detail="Not a valid XLSX workbook")
++
++
++def _parse_form(synthetic: str | None, fx_rate: float | None) -> tuple[bool | None, float | None]:
++    synthetic_value = None
++    if synthetic is not None and synthetic.strip() != "":
++        s = synthetic.strip().lower()
++        if s not in ("true", "false"):
++            raise HTTPException(status_code=422, detail="synthetic must be 'true' or 'false'")
++        synthetic_value = s == "true"
++    if fx_rate is not None and not (math.isfinite(fx_rate) and 0 < fx_rate <= 1000):
++        raise HTTPException(status_code=422, detail="fx_rate must be greater than 0 and at most 1000")
++    return synthetic_value, fx_rate
++
++
++def _scrub_report(report: dict, label: str) -> dict:
++    """Remove server paths from the adaptation report."""
++    report["original_file"]["path"] = label
++    report["adapted_file"]["path"] = ""
++    report.get("config", {}).pop("data_dir", None)
++    return report
++
++
++def _run_adapter(
++    raw: bytes, fmt: str, synthetic: bool | None, fx_rate: float | None,
++    accept_uncertain: bool, workdir: Path,
++) -> tuple[AdaptationResult, dict]:
++    input_path = workdir / f"input.{fmt}"  # server-generated name
++    input_path.write_bytes(raw)
++    data_dir = Path(os.environ.get("DATA_DIR", REPO_ROOT / "data")).resolve()
++    config = AdapterConfig.load(fx_rate=fx_rate, data_dir=data_dir)
++    try:
++        result = adapt_file(
++            input_path=input_path,
++            output_dir=workdir / "out",
++            config=config,
++            synthetic=synthetic,
++            accept_uncertain=accept_uncertain,
++        )
++    except ValueError as exc:  # unreadable file / no table / limits: the user's file is the problem
++        raise HTTPException(status_code=422, detail=str(exc)[:300])
++    label = f"upload.{fmt}"
++    return result, _scrub_report(result.report.to_dict(), label)
++
++
++def _handle(
++    request: Request, file: UploadFile, synthetic: str | None, fx_rate: float | None,
++    accept_uncertain: bool, run: bool,
++) -> JSONResponse:
++    started = time.monotonic()
++    synthetic_value, fx_value = _parse_form(synthetic, fx_rate)
++    raw = _read_upload(file)
++    fmt = _sniff_format(raw)
++    if fmt == "unknown":
++        raise HTTPException(status_code=415, detail="Unsupported file. Allowed: PDF, CSV, XLSX, GeoJSON")
++    if fmt == "xlsx":
++        _check_xlsx(raw)
++    if fmt == "geojson":
++        try:
++            json.loads(raw)
++        except ValueError:
++            raise HTTPException(status_code=415, detail="Invalid GeoJSON")
++
++    sha = hashlib.sha256(raw).hexdigest()
++    body: dict
++    status_code = 200
++    try:
++        with tempfile.TemporaryDirectory(prefix="nairobi-") as tmp:
++            result, report = _run_adapter(raw, fmt, synthetic_value, fx_value, accept_uncertain, Path(tmp))
++            adapted_csv = None
++            if result.adapted_path and result.adapted_path.exists():
++                adapted_csv = result.adapted_path.read_text(encoding="utf-8")
++            if not run:
++                body = {"status": result.status, "adapted_csv": adapted_csv, "report": report}
++                status_code = 422 if result.status == "refused" else 200
++            elif result.status == "refused":
++                body = {"adapter_status": "refused", "run_status": "not_run", "adaptation_report": report}
++                status_code = 422
++            elif result.status == "needs_confirmation":
++                body = {"adapter_status": result.status, "run_status": "not_run", "adaptation_report": report,
++                        "message": "Adapter needs confirmation; resend with accept_uncertain=true to run."}
++            else:
++                status_code, run_part = _run_engine(result.adapted_path)
++                body = {"adapter_status": result.status, "adaptation_report": report, **run_part}
++    except HTTPException:
++        raise
++    except Exception:
++        logger.exception("Unexpected error (sha256=%s)", sha)
++        raise HTTPException(status_code=500, detail="Internal server error")
++    logger.info("request sha256=%s fmt=%s http=%s seconds=%.2f", sha, fmt, status_code, time.monotonic() - started)
++    return JSONResponse(status_code=status_code, content=body)
++
++
++def _records(df) -> list[dict]:
++    return json.loads(df.to_json(orient="records"))
++
++
++def _run_engine(adapted_path: Path) -> tuple[int, dict]:
++    """Call the deterministic engine on the adapted CSV. No loss value is computed here."""
++    from loss_engine.config import default_config
++    from loss_engine.ep_curve import default_return_periods
++    from loss_engine.run_record import run_model
++
++    result = run_model(exposure_path=adapted_path, config=default_config(), mapping=default_return_periods())
++    record = json.loads(result.record.to_json())
++    if result.outputs is None:
++        return 422, {
++            "run_status": record["status"], "failed_at": record["failed_at"],
++            "failure": record["failure"], "validation_results": record["validation_results"],
++        }
++    out = result.outputs
++    return 200, {
++        "run_status": record["status"], "run_id": record["run_id"],
++        "validation_results": record["validation_results"],
++        "total_tiv_kes": record["total_tiv_kes"], "row_count": record["row_count"],
++        "tier_summary": _records(out.tier_summary),
++        "class_summary": _records(out.class_summary),
++        "ep_points": _records(out.ep_points),
++        "building_results": _records(out.building_results.head(MAX_BUILDING_ROWS)),
++        "building_results_truncated": len(out.building_results) > MAX_BUILDING_ROWS,
++    }
++
++
++@app.post("/adapt", dependencies=[Depends(require_key)])
++def adapt_endpoint(
++    request: Request,
++    file: UploadFile = File(...),
++    synthetic: str | None = Form(None),
++    fx_rate: float | None = Form(None),
++    accept_uncertain: bool = Form(False),
++) -> JSONResponse:
++    """Adapt an exposure file to the canonical schema (no model run)."""
++    return _handle(request, file, synthetic, fx_rate, accept_uncertain, run=False)
++
++
++@app.post("/run", dependencies=[Depends(require_key)])
++def run_endpoint(
++    request: Request,
++    file: UploadFile = File(...),
++    synthetic: str | None = Form(None),
++    fx_rate: float | None = Form(None),
++    accept_uncertain: bool = Form(False),
++) -> JSONResponse:
++    """Adapt the file, then run the deterministic loss engine on it."""
++    return _handle(request, file, synthetic, fx_rate, accept_uncertain, run=True)
++
++
++@app.get("/", include_in_schema=False)
++def index() -> FileResponse:
++    return FileResponse(STATIC_DIR / "index.html")
+diff --git a/api/static/index.html b/api/static/index.html
+new file mode 100644
+index 0000000..f6375ea
+--- /dev/null
++++ b/api/static/index.html
+@@ -0,0 +1,322 @@
++<!doctype html>
++<html lang="en">
++<head>
++<meta charset="utf-8">
++<meta name="viewport" content="width=device-width, initial-scale=1">
++<title>Nairobi Flood CAT Model - Exposure intake</title>
++
++<!-- Shared design system -->
++<style>
++:root {
++  --paper: #faf8f5; --surface: #ffffff; --ink: #1b1b1b; --muted: #5f5a54; --rule: #d9d3ca;
++  --accent: #12355b; --accent-ink: #ffffff; --ok: #1f5f3b; --ok-bg: #edf5ef;
++  --warn: #7a5200; --warn-bg: #fbf3e2; --bad: #8c1c13; --bad-bg: #fbeceb;
++  --serif: Georgia, "Times New Roman", serif;
++  --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
++}
++* { box-sizing: border-box; }
++html { font-size: 16px; }
++body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--sans); line-height: 1.5; }
++.wrap { max-width: 1040px; margin: 0 auto; padding: 40px 24px 80px; }
++.eyebrow { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px; }
++h1 { font-family: var(--serif); font-weight: 700; font-size: 32px; line-height: 1.2; margin: 0 0 8px; }
++h2 { font-family: var(--serif); font-weight: 700; font-size: 20px; margin: 0 0 12px; }
++.lede { color: var(--muted); max-width: 70ch; margin: 0 0 32px; }
++.panel { background: var(--surface); border: 1px solid var(--rule); border-radius: 4px; padding: 24px; margin-bottom: 24px; }
++label, .label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; }
++.hint { font-size: 13px; color: var(--muted); margin: 6px 0 0; }
++input[type=text], input[type=password], select {
++  width: 100%; padding: 9px 10px; font: inherit; color: inherit; background: var(--surface);
++  border: 1px solid var(--rule); border-radius: 3px;
++}
++input:focus-visible, select:focus-visible, button:focus-visible, .drop:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
++.btn { font: inherit; font-weight: 600; padding: 10px 18px; border-radius: 3px; border: 1px solid var(--accent); cursor: pointer; }
++.btn-primary { background: var(--accent); color: var(--accent-ink); }
++.btn-secondary { background: var(--surface); color: var(--accent); }
++.btn[disabled] { opacity: .5; cursor: not-allowed; }
++.banner { border: 1px solid var(--rule); border-radius: 3px; padding: 12px 14px; margin-bottom: 20px; display: flex; gap: 10px; align-items: flex-start; }
++.banner svg { flex: none; margin-top: 2px; }
++.banner.ok { background: var(--ok-bg); border-color: var(--ok); color: var(--ok); }
++.banner.warn { background: var(--warn-bg); border-color: var(--warn); color: var(--warn); }
++.banner.bad { background: var(--bad-bg); border-color: var(--bad); color: var(--bad); }
++.banner p { margin: 0; color: var(--ink); }
++.banner strong { display: block; }
++table { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; }
++caption { text-align: left; font-weight: 600; padding-bottom: 8px; }
++thead th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
++  border-top: 2px solid var(--ink); border-bottom: 1px solid var(--rule); padding: 8px 10px; }
++tbody td { border-bottom: 1px solid var(--rule); padding: 8px 10px; }
++th.num, td.num { text-align: right; }
++.table-scroll { overflow-x: auto; }
++ul.plain { margin: 0; padding-left: 18px; }
++ul.plain li { margin: 2px 0; }
++.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
++</style>
++
++<!-- Page-specific -->
++<style>
++.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
++.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
++@media (max-width: 720px) { .grid, .grid-3 { grid-template-columns: 1fr; } }
++.drop { display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; padding: 28px 16px;
++  border: 1.5px dashed var(--muted); border-radius: 4px; cursor: pointer; background: var(--paper); }
++.drop.over { background: #f0ebe3; }
++.drop svg { color: var(--accent); }
++.drop .name { font-weight: 600; word-break: break-all; }
++.row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-top: 20px; }
++.check { display: flex; align-items: center; gap: 8px; font-weight: 400; margin: 0; }
++.figure { border-top: 2px solid var(--ink); padding-top: 8px; }
++.figure .v { font-family: var(--serif); font-size: 28px; font-weight: 700; }
++.figure .k { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
++.toolbar { display: flex; gap: 16px; flex-wrap: wrap; align-items: end; margin-bottom: 16px; }
++.toolbar > div { min-width: 200px; }
++.note { font-size: 13px; color: var(--muted); }
++details summary { cursor: pointer; font-weight: 600; }
++#results[hidden], #status[hidden] { display: none; }
++</style>
++</head>
++<body>
++<main class="wrap">
++  <p class="eyebrow">Team A &middot; Nairobi Urban Flood Challenge</p>
++  <h1>Exposure intake and loss run</h1>
++  <p class="lede">Upload an exposure schedule as a PDF table, CSV, XLSX or GeoJSON. The adapter converts it to the model schema and records every change; the deterministic loss engine then calculates all losses. This page only displays what the backend returns.</p>
++
++  <section class="panel" aria-labelledby="upload-h">
++    <h2 id="upload-h">1. Upload</h2>
++    <div class="grid">
++      <div>
++        <span class="label">Exposure file</span>
++        <label class="drop" id="drop" for="file">
++          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4"/><path d="M7 9l5-5 5 5"/><path d="M5 20h14"/></svg>
++          <span class="name" id="fname">Choose a file or drop it here</span>
++          <span class="note">PDF (text tables only, no scans), CSV, XLSX, GeoJSON. Up to 10 MB.</span>
++          <input class="sr-only" type="file" id="file" accept=".pdf,.csv,.xlsx,.geojson,.json">
++        </label>
++      </div>
++      <div>
++        <label for="synthetic">Is this portfolio synthetic?</label>
++        <select id="synthetic">
++          <option value="">Use the file's synthetic column</option>
++          <option value="true">Declare as synthetic</option>
++          <option value="false">Declare as real</option>
++        </select>
++        <p class="hint">The model refuses data whose synthetic status is not stated.</p>
++        <div style="margin-top:16px">
++          <label for="key">API key</label>
++          <input type="password" id="key" autocomplete="off" placeholder="Value of ADAPTER_API_KEY">
++          <p class="hint">Kept in this page's memory only; never stored.</p>
++        </div>
++        <div style="margin-top:16px">
++          <label class="check"><input type="checkbox" id="accept"> Accept uncertain mappings without confirmation</label>
++        </div>
++      </div>
++    </div>
++    <div class="row">
++      <button class="btn btn-primary" id="run" type="button">Run loss model</button>
++      <button class="btn btn-secondary" id="adapt" type="button">Adapt only</button>
++    </div>
++  </section>
++
++  <div id="status" hidden></div>
++
++  <div id="results" hidden>
++    <section class="panel" aria-labelledby="in-h">
++      <h2 id="in-h">2. How the file was read</h2>
++      <div class="grid-3" id="figures"></div>
++      <div id="adapt-notes" style="margin-top:20px"></div>
++    </section>
++
++    <section class="panel" id="model" aria-labelledby="out-h" hidden>
++      <h2 id="out-h">3. Model output</h2>
++      <div class="toolbar">
++        <div><label for="scenario">Scenario</label><select id="scenario"></select></div>
++        <div><label for="tier">Hazard tier (class table)</label><select id="tier"></select></div>
++      </div>
++      <div class="table-scroll" id="t-tier"></div>
++      <div class="table-scroll" id="t-ep" style="margin-top:28px"></div>
++      <div class="table-scroll" id="t-class" style="margin-top:28px"></div>
++      <details style="margin-top:28px"><summary>Validation rules (<span id="vcount"></span>)</summary><div class="table-scroll" id="t-val" style="margin-top:12px"></div></details>
++      <p class="note" style="margin-top:20px">All figures are calculated by the backend loss engine from the adapted file. Synthetic inputs are not a real insurer portfolio.</p>
++    </section>
++  </div>
++</main>
++
++<script>
++(function () {
++  "use strict";
++  var $ = function (id) { return document.getElementById(id); };
++  var state = { file: null, data: null };
++  var ICONS = {
++    ok: '<path d="M20 6L9 17l-5-5"/>',
++    warn: '<path d="M12 3l10 18H2L12 3z"/><path d="M12 10v5"/><path d="M12 18h.01"/>',
++    bad: '<circle cx="12" cy="12" r="9"/><path d="M15 9l-6 6"/><path d="M9 9l6 6"/>'
++  };
++
++  function el(tag, attrs, kids) {
++    var n = document.createElement(tag);
++    Object.keys(attrs || {}).forEach(function (k) {
++      if (k === "class") n.className = attrs[k]; else n.setAttribute(k, attrs[k]);
++    });
++    [].concat(kids === undefined ? [] : kids).forEach(function (c) {
++      n.appendChild(typeof c === "string" ? document.createTextNode(c) : c);
++    });
++    return n;
++  }
++  function svg(kind) {
++    var s = document.createElementNS("http://www.w3.org/2000/svg", "svg");
++    ["width", "height"].forEach(function (a) { s.setAttribute(a, "20"); });
++    s.setAttribute("viewBox", "0 0 24 24"); s.setAttribute("fill", "none"); s.setAttribute("stroke", "currentColor");
++    s.setAttribute("stroke-width", "1.8"); s.setAttribute("stroke-linecap", "round"); s.setAttribute("stroke-linejoin", "round");
++    s.setAttribute("aria-hidden", "true"); s.innerHTML = ICONS[kind]; return s;
++  }
++  var nf0 = new Intl.NumberFormat("en-KE", { maximumFractionDigits: 0 });
++  var pct = function (v) { return v == null ? "" : (v * 100).toFixed(2) + "%"; };
++  var kes = function (v) { return v == null ? "" : nf0.format(v); };
++
++  function banner(kind, title, lines) {
++    var box = $("status"); box.hidden = false; box.replaceChildren();
++    var body = el("div", {}, [el("strong", {}, title)].concat((lines || []).map(function (l) { return el("p", {}, l); })));
++    box.appendChild(el("div", { "class": "banner " + kind, role: kind === "bad" ? "alert" : "status" }, [svg(kind), body]));
++  }
++
++  function table(caption, cols, rows) {
++    var head = el("tr", {}, cols.map(function (c) { return el("th", { "class": c.num ? "num" : "", scope: "col" }, c.label); }));
++    var body = rows.map(function (r) {
++      return el("tr", {}, cols.map(function (c) { return el("td", { "class": c.num ? "num" : "" }, String(c.get(r))); }));
++    });
++    return el("table", {}, [el("caption", {}, caption), el("thead", {}, head), el("tbody", {}, body)]);
++  }
++
++  function figure(k, v) { return el("div", { "class": "figure" }, [el("div", { "class": "v" }, String(v)), el("div", { "class": "k" }, k)]); }
++
++  function listBlock(title, items) {
++    if (!items || !items.length) return null;
++    return el("div", { style: "margin-top:12px" }, [el("div", { "class": "label" }, title),
++      el("ul", { "class": "plain" }, items.map(function (i) { return el("li", {}, i); }))]);
++  }
++
++  function renderAdaptation(report, status) {
++    var f = $("figures"); f.replaceChildren();
++    var prof = (report.original_file || {}).profile || {};
++    f.appendChild(figure("Source format", (prof.format || "").toUpperCase()));
++    f.appendChild(figure("Rows read", prof.n_rows != null ? nf0.format(prof.n_rows) : ""));
++    f.appendChild(figure("Adapter status", status));
++    var notes = $("adapt-notes"); notes.replaceChildren();
++    var blocks = [
++      listBlock("Refusal reasons", report.refusal_reasons),
++      listBlock("Needs your confirmation", (report.needs_confirmation_proposals || []).map(function (p) {
++        return p.message || (p.type + ": " + JSON.stringify(p).slice(0, 160));
++      })),
++      listBlock("Notes on the file", prof.warnings),
++      listBlock("Rows flagged", Object.entries((report.flagged_rows || []).reduce(function (a, r) { a[r.reason] = (a[r.reason] || 0) + 1; return a; }, {}))
++        .map(function (e) { return e[1] + " row(s): " + e[0]; }))
++    ];
++    blocks.forEach(function (b) { if (b) notes.appendChild(b); });
++  }
++
++  function fillSelect(sel, values, keep) {
++    sel.replaceChildren();
++    values.forEach(function (v) { sel.appendChild(el("option", { value: v }, v)); });
++    if (keep && values.indexOf(keep) >= 0) sel.value = keep;
++  }
++
++  function renderModel(d) {
++    $("model").hidden = false;
++    var scenarios = Array.from(new Set(d.tier_summary.map(function (r) { return r.scenario_id; })));
++    var tiers = Array.from(new Set(d.tier_summary.map(function (r) { return r.tier; })));
++    fillSelect($("scenario"), scenarios, scenarios.indexOf("reference") >= 0 ? "reference" : scenarios[0]);
++    fillSelect($("tier"), tiers, $("tier").value);
++    drawTables();
++    var vt = table("", [
++      { label: "Rule", get: function (r) { return r.rule; } },
++      { label: "Stage", get: function (r) { return r.stage; } },
++      { label: "Status", get: function (r) { return r.status; } },
++      { label: "Detail", get: function (r) { return r.detail || ""; } }
++    ], d.validation_results);
++    $("vcount").textContent = d.validation_results.length + " checks";
++    $("t-val").replaceChildren(vt);
++  }
++
++  function drawTables() {
++    var d = state.data; if (!d || !d.tier_summary) return;
++    var sc = $("scenario").value, tier = $("tier").value;
++    $("t-tier").replaceChildren(table("Loss by hazard tier - scenario " + sc, [
++      { label: "Tier", get: function (r) { return r.tier; } },
++      { label: "Buildings", num: 1, get: function (r) { return nf0.format(r.buildings); } },
++      { label: "Affected", num: 1, get: function (r) { return nf0.format(r.affected_buildings); } },
++      { label: "Affected TIV (KES)", num: 1, get: function (r) { return kes(r.affected_tiv_kes); } },
++      { label: "Portfolio loss (KES)", num: 1, get: function (r) { return kes(r.portfolio_loss_kes); } },
++      { label: "Loss, % of portfolio", num: 1, get: function (r) { return pct(r.loss_pct_portfolio); } }
++    ], d.tier_summary.filter(function (r) { return r.scenario_id === sc; })));
++    $("t-ep").replaceChildren(table("Exceedance probability points - scenario " + sc, [
++      { label: "Tier", get: function (r) { return r.tier; } },
++      { label: "Return period (years)", num: 1, get: function (r) { return r.return_period_years; } },
++      { label: "Annual exceedance probability", num: 1, get: function (r) { return pct(r.annual_exceedance_probability); } },
++      { label: "Portfolio loss (KES)", num: 1, get: function (r) { return kes(r.portfolio_loss_kes); } },
++      { label: "Loss, % of portfolio", num: 1, get: function (r) { return pct(r.loss_pct_portfolio); } }
++    ], d.ep_points.filter(function (r) { return r.scenario_id === sc; })));
++    $("t-class").replaceChildren(table("Loss by housing class - " + tier + " tier, scenario " + sc, [
++      { label: "Housing class", get: function (r) { return r.housing_class; } },
++      { label: "Buildings", num: 1, get: function (r) { return nf0.format(r.buildings); } },
++      { label: "Affected", num: 1, get: function (r) { return nf0.format(r.affected_buildings); } },
++      { label: "Loss (KES)", num: 1, get: function (r) { return kes(r.loss_kes); } },
++      { label: "Loss ratio", num: 1, get: function (r) { return pct(r.loss_ratio); } },
++      { label: "Share of tier loss", num: 1, get: function (r) { return pct(r.share_of_tier_loss); } }
++    ], d.class_summary.filter(function (r) { return r.scenario_id === sc && r.tier === tier; })));
++  }
++
++  function send(path) {
++    if (!state.file) { banner("warn", "Choose a file first."); return; }
++    if (!$("key").value) { banner("warn", "Enter the API key."); return; }
++    var fd = new FormData();
++    fd.append("file", state.file);
++    if ($("synthetic").value) fd.append("synthetic", $("synthetic").value);
++    if ($("accept").checked) fd.append("accept_uncertain", "true");
++    $("run").disabled = $("adapt").disabled = true;
++    $("results").hidden = true; $("model").hidden = true;
++    banner("warn", "Working", ["Reading the file" + (path === "/run" ? " and running the loss model." : ".")]);
++    fetch(path, { method: "POST", headers: { "X-API-Key": $("key").value }, body: fd })
++      .then(function (res) { return res.json().then(function (j) { return { code: res.status, body: j }; }, function () { return { code: res.status, body: {} }; }); })
++      .then(function (r) { handle(path, r.code, r.body); })
++      .catch(function () { banner("bad", "Could not reach the server."); })
++      .then(function () { $("run").disabled = $("adapt").disabled = false; });
++  }
++
++  function handle(path, code, b) {
++    state.data = b;
++    if (code === 401) return banner("bad", "The API key was not accepted.");
++    if (code === 413) return banner("bad", "The file is larger than 10 MB.");
++    if (code === 415) return banner("bad", "That file type is not supported.", [b.detail || ""]);
++    if (code === 429 || code >= 500) return banner("bad", "The server could not process the request.", [b.detail || ""]);
++    if (b.detail && !b.report && !b.adaptation_report) return banner("bad", "The file could not be used.", [typeof b.detail === "string" ? b.detail : "Check the form fields."]);
++    var report = b.report || b.adaptation_report || {};
++    var status = b.status || b.adapter_status || "";
++    $("results").hidden = false;
++    renderAdaptation(report, status);
++    if (path === "/adapt") {
++      $("model").hidden = true;
++      if (status === "refused") banner("bad", "The adapter refused this file.", ["The reasons are listed below; nothing was guessed."]);
++      else if (status === "needs_confirmation") banner("warn", "The adapter needs confirmation.", ["Review the proposals below, then tick the accept box or fix the file."]);
++      else banner("ok", "File adapted.", ["The adapted file meets the model schema. Use Run loss model to calculate losses."]);
++      return;
++    }
++    if (b.run_status === "completed") { banner("ok", "Loss model completed.", ["Run " + b.run_id + " - " + nf0.format(b.row_count) + " buildings, total insured value KES " + kes(Number(b.total_insured_value || b.total_tiv_kes)) + "."]); renderModel(b); return; }
++    if (b.run_status === "failed") return banner("bad", "The loss engine stopped on a failed rule.", ["Rule stage: " + b.failed_at, b.failure || ""]);
++    if (status === "refused") return banner("bad", "The adapter refused this file, so the model was not run.");
++    banner("warn", "The model was not run.", [b.message || "The adapter needs confirmation."]);
++  }
++
++  function setFile(f) { state.file = f; $("fname").textContent = f ? f.name + " (" + Math.ceil(f.size / 1024) + " KB)" : "Choose a file or drop it here"; }
++  $("file").addEventListener("change", function (e) { setFile(e.target.files[0] || null); });
++  var drop = $("drop");
++  ["dragenter", "dragover"].forEach(function (t) { drop.addEventListener(t, function (e) { e.preventDefault(); drop.classList.add("over"); }); });
++  ["dragleave", "drop"].forEach(function (t) { drop.addEventListener(t, function (e) { e.preventDefault(); drop.classList.remove("over"); }); });
++  drop.addEventListener("drop", function (e) { if (e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]); });
++  $("run").addEventListener("click", function () { send("/run"); });
++  $("adapt").addEventListener("click", function () { send("/adapt"); });
++  $("scenario").addEventListener("change", drawTables);
++  $("tier").addEventListener("change", drawTables);
++})();
++</script>
++</body>
++</html>
+diff --git a/api/tests/test_api.py b/api/tests/test_api.py
+new file mode 100644
+index 0000000..cbae22a
+--- /dev/null
++++ b/api/tests/test_api.py
+@@ -0,0 +1,254 @@
++"""API tests: auth, upload validation, PDF/CSV/XLSX/GeoJSON paths, and the /run engine hand-off."""
++
++from __future__ import annotations
++
++import glob
++import io
++import json
++import os
++import tempfile
++from concurrent.futures import ThreadPoolExecutor
++from pathlib import Path
++
++import pytest
++from fastapi.testclient import TestClient
++
++from conftest import REPO_ROOT, exposure_rows, make_pdf, make_text_pdf, rows_to_csv_bytes
++
++KEY = "test-secret-key"
++HEADERS = {"X-API-Key": KEY}
++
++
++@pytest.fixture
++def client(monkeypatch):
++    monkeypatch.setenv("ADAPTER_API_KEY", KEY)
++    from api.main import app
++
++    with TestClient(app) as c:
++        yield c
++
++
++def post(client, path, data, name="f", headers=HEADERS, **form):
++    return client.post(path, headers=headers, files={"file": (name, data)}, data=form)
++
++
++def hazard_columns_dropped(rows):
++    keep = [i for i, h in enumerate(rows[0]) if not h.startswith("hazard_score_")]
++    return [[r[i] for i in keep] for r in rows]
++
++
++# --- startup and auth -----------------------------------------------------------
++
++
++def test_startup_fails_without_key(monkeypatch):
++    monkeypatch.delenv("ADAPTER_API_KEY", raising=False)
++    from api.main import app
++
++    with pytest.raises(RuntimeError, match="ADAPTER_API_KEY"):
++        with TestClient(app):
++            pass
++
++
++def test_missing_key_401(client):
++    assert post(client, "/adapt", rows_to_csv_bytes(exposure_rows(2)), headers={}, synthetic="true").status_code == 401
++
++
++def test_wrong_key_401(client):
++    r = post(client, "/adapt", rows_to_csv_bytes(exposure_rows(2)), headers={"X-API-Key": "nope"}, synthetic="true")
++    assert r.status_code == 401
++
++
++def test_non_ascii_key_does_not_crash(client):
++    r = post(client, "/adapt", b"a,b\n1,2", headers={"X-API-Key": b"\xff\xfe"}, synthetic="true")
++    assert r.status_code == 401
++
++
++def test_run_requires_key_too(client):
++    assert post(client, "/run", rows_to_csv_bytes(exposure_rows(2)), headers={}, synthetic="true").status_code == 401
++
++
++# --- upload validation ----------------------------------------------------------
++
++
++def test_binary_garbage_is_415_even_if_named_pdf(client):
++    assert post(client, "/adapt", bytes(range(256)) * 4, name="x.pdf", synthetic="true").status_code == 415
++
++
++def test_corrupt_pdf_is_422_not_500(client):
++    assert post(client, "/adapt", b"%PDF-1.4 garbage", name="x.pdf", synthetic="true").status_code == 422
++
++
++def test_bad_xlsx_is_415(client):
++    assert post(client, "/adapt", b"PK fake zip", name="x.xlsx", synthetic="true").status_code == 415
++
++
++def test_old_xls_is_415(client):
++    ole = bytes.fromhex("d0cf11e0a1b11ae1") + b"\x00" * 600
++    assert post(client, "/adapt", ole, name="x.xls", synthetic="true").status_code == 415
++
++
++def test_oversize_413(client):
++    assert post(client, "/adapt", b"a,b\n" + b"1,2\n" * (3 * 1024 * 1024), name="big.csv", synthetic="true").status_code == 413
++
++
++def test_synthetic_must_be_true_or_false(client):
++    r = post(client, "/adapt", rows_to_csv_bytes(exposure_rows(2)), synthetic="banana")
++    assert r.status_code == 422
++
++
++@pytest.mark.parametrize("fx", ["0", "-5", "2000", "nan", "inf"])
++def test_fx_rate_out_of_range(client, fx):
++    assert post(client, "/adapt", rows_to_csv_bytes(exposure_rows(2)), synthetic="true", fx_rate=fx).status_code == 422
++
++
++# --- /adapt ---------------------------------------------------------------------
++
++
++def test_csv_happy_path(client):
++    r = post(client, "/adapt", rows_to_csv_bytes(exposure_rows(5)), name="a.csv", synthetic="true")
++    assert r.status_code == 200, r.text
++    body = r.json()
++    assert body["status"] == "accepted" and body["adapted_csv"].startswith("loc_id,")
++    assert body["report"]["adapted_file"]["path"] == ""
++
++
++def test_pdf_happy_path_with_synonym_headers(client):
++    rows = exposure_rows(5)
++    rename = {"lat": "Latitude", "lon": "Longitude", "tiv_kes": "Sum Insured", "housing_class": "Construction"}
++    rows[0] = [rename.get(h, h) for h in rows[0]]
++    r = post(client, "/adapt", make_pdf([rows]), name="offer.pdf", synthetic="true")
++    assert r.status_code == 200, r.text
++    body = r.json()
++    assert body["status"] == "accepted"
++    assert any("mapped to" in w for w in body["report"]["original_file"]["profile"]["warnings"])
++
++
++def test_text_only_pdf_is_422(client):
++    r = post(client, "/adapt", make_text_pdf(), name="x.pdf", synthetic="true")
++    assert r.status_code == 422 and "No tables" in r.json()["detail"]
++
++
++def test_pdf_over_50_pages_is_422(client):
++    tables = [[["a", "b"], ["1", "2"]]] * 51
++    assert post(client, "/adapt", make_pdf(tables), name="x.pdf", synthetic="true").status_code == 422
++
++
++def test_xlsx_happy_path(client):
++    data = (REPO_ROOT / "adapter/tests/fixtures/adapter/xlsx_input.xlsx").read_bytes()
++    r = post(client, "/adapt", data, name="x.xlsx", synthetic="true")
++    assert r.status_code in (200, 422) and r.status_code != 500
++    assert r.json().get("status") in ("accepted", "needs_confirmation", "refused")
++
++
++def test_geojson_happy_path(client):
++    data = (REPO_ROOT / "adapter/tests/fixtures/adapter/geojson_points.geojson").read_bytes()
++    r = post(client, "/adapt", data, name="x.geojson", synthetic="true")
++    assert r.status_code != 500
++
++
++def test_refused_returns_422_with_report(client):
++    rows = exposure_rows(3)
++    drop = rows[0].index("tiv_kes")
++    rows = [[c for i, c in enumerate(r) if i != drop] for r in rows]
++    r = post(client, "/adapt", rows_to_csv_bytes(rows), synthetic="true")
++    assert r.status_code == 422
++    body = r.json()
++    assert body["status"] == "refused" and body["adapted_csv"] is None
++    assert any("tiv_kes" in x for x in body["report"]["refusal_reasons"])
++
++
++def test_undeclared_synthetic_is_refused(client):
++    rows = exposure_rows(3)
++    drop = rows[0].index("synthetic")
++    rows = [[c for i, c in enumerate(r) if i != drop] for r in rows]
++    assert post(client, "/adapt", rows_to_csv_bytes(rows)).status_code == 422
++
++
++def test_no_server_paths_in_response(client):
++    r = post(client, "/adapt", make_pdf([exposure_rows(4)]), name="C:\\secret\\evil.pdf", synthetic="true")
++    text = r.text
++    assert tempfile.gettempdir() not in text
++    assert str(REPO_ROOT) not in text
++    assert "nairobi-" not in text
++    assert "evil" not in text  # client filename is never echoed
++
++
++def test_temp_dirs_are_cleaned_up(client):
++    pattern = os.path.join(tempfile.gettempdir(), "nairobi-*")
++    before = set(glob.glob(pattern))
++    post(client, "/adapt", rows_to_csv_bytes(exposure_rows(3)), synthetic="true")
++    post(client, "/adapt", b"%PDF-1.4 garbage", synthetic="true")
++    assert set(glob.glob(pattern)) == before
++
++
++def test_concurrent_requests_do_not_collide(client):
++    def go(n):
++        r = post(client, "/adapt", rows_to_csv_bytes(exposure_rows(n)), synthetic="true")
++        return n, r.json()["report"]["adapted_file"]["n_rows"]
++
++    with ThreadPoolExecutor(max_workers=4) as pool:
++        results = list(pool.map(go, [2, 3, 4, 5, 6, 2, 3, 4]))
++    assert all(n == rows for n, rows in results)
++
++
++# --- /run -----------------------------------------------------------------------
++
++
++def test_run_pdf_completes_and_returns_engine_outputs(client):
++    r = post(client, "/run", make_pdf([exposure_rows(8)]), name="o.pdf", synthetic="true")
++    assert r.status_code == 200, r.text
++    body = r.json()
++    assert body["adapter_status"] == "accepted" and body["run_status"] == "completed"
++    scenarios = {r["scenario_id"] for r in body["tier_summary"]}
++    assert len({r["tier"] for r in body["tier_summary"]}) == 5
++    assert len(body["tier_summary"]) == 5 * len(scenarios) and len(body["ep_points"]) > 0
++    assert len(body["building_results"]) == 8 * len(scenarios) * 5  # buildings x scenarios x tiers
++    assert not [v for v in body["validation_results"] if v["status"] == "fail"]
++
++
++def test_run_matches_engine_called_directly(client, tmp_path):
++    from loss_engine.config import default_config
++    from loss_engine.ep_curve import default_return_periods
++    from loss_engine.run_record import run_model
++
++    rows = exposure_rows(8)
++    csv_path = tmp_path / "in.csv"
++    csv_path.write_bytes(rows_to_csv_bytes(rows))
++    direct = run_model(exposure_path=csv_path, config=default_config(), mapping=default_return_periods())
++    api_body = post(client, "/run", make_pdf([rows]), name="o.pdf", synthetic="true").json()
++    def strip(rows):
++        return [{k: v for k, v in r.items() if k != "run_id"} for r in rows]
++
++    expected = json.loads(direct.outputs.tier_summary.to_json(orient="records"))
++    assert strip(api_body["tier_summary"]) == strip(expected)
++
++
++def test_run_without_hazard_columns_fails_cleanly_with_422(client):
++    rows = hazard_columns_dropped(exposure_rows(5))
++    r = post(client, "/run", make_pdf([rows]), name="o.pdf", synthetic="true")
++    assert r.status_code == 422
++    body = r.json()
++    assert body["run_status"] == "failed" and body["failed_at"]
++    assert "tier_summary" not in body
++
++
++def test_run_refused_does_not_run_model(client):
++    rows = exposure_rows(3)
++    drop = rows[0].index("tiv_kes")
++    rows = [[c for i, c in enumerate(r) if i != drop] for r in rows]
++    r = post(client, "/run", rows_to_csv_bytes(rows), synthetic="true")
++    assert r.status_code == 422 and r.json()["run_status"] == "not_run"
++
++
++def test_run_needs_confirmation_does_not_run_unless_accepted(client):
++    rows = exposure_rows(4)
++    idx = {h: i for i, h in enumerate(rows[0])}
++    for r in rows[1:]:  # break the V7 ordering: extreme > common
++        r[idx["hazard_score_common"]], r[idx["hazard_score_extreme"]] = "0.0", "0.9"
++    r = post(client, "/run", rows_to_csv_bytes(rows), synthetic="true")
++    assert r.status_code == 200
++    assert r.json()["adapter_status"] == "needs_confirmation" and r.json()["run_status"] == "not_run"
++
++
++def test_index_page_served(client):
++    assert client.get("/").status_code == 200
+diff --git a/conftest.py b/conftest.py
+new file mode 100644
+index 0000000..c5bc388
+--- /dev/null
++++ b/conftest.py
+@@ -0,0 +1,77 @@
++"""Shared test helpers: real exposure rows and reportlab-generated PDFs (no binary fixtures)."""
++
++from __future__ import annotations
++
++import csv
++import io
++from pathlib import Path
++
++import pytest
++
++REPO_ROOT = Path(__file__).resolve().parent
++EXPOSURE_CSV = REPO_ROOT / "data" / "exposure_nairobi_with_hazard.csv"
++
++
++def exposure_rows(n: int = 6) -> list[list[str]]:
++    """Header + n rows from the supplied dataset, with a short source so PDF cells do not wrap."""
++    with EXPOSURE_CSV.open(newline="", encoding="utf-8") as f:
++        rows = list(csv.reader(f))
++    header, body = rows[0], rows[1 : n + 1]
++    src = header.index("source")
++    for r in body:
++        r[src] = "test portfolio"
++    return [header] + body
++
++
++def rows_to_csv_bytes(rows: list[list[str]]) -> bytes:
++    buf = io.StringIO()
++    csv.writer(buf, lineterminator="\n").writerows(rows)
++    return buf.getvalue().encode("utf-8")
++
++
++def make_pdf(
++    tables: list[list[list[str]]],
++    *,
++    page_break_between: bool = True,
++    repeat_rows: int = 0,
++    font_size: int = 6,
++) -> bytes:
++    """Build a PDF containing the given tables (each a list of rows, header first)."""
++    from reportlab.lib import colors
++    from reportlab.lib.pagesizes import A3, landscape
++    from reportlab.platypus import PageBreak, SimpleDocTemplate, Spacer, Table, TableStyle
++
++    buf = io.BytesIO()
++    doc = SimpleDocTemplate(buf, pagesize=landscape(A3))
++    flow = []
++    for i, data in enumerate(tables):
++        t = Table(data, repeatRows=repeat_rows)
++        t.setStyle(TableStyle([
++            ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
++            ("FONTSIZE", (0, 0), (-1, -1), font_size),
++        ]))
++        flow.append(t)
++        if i < len(tables) - 1:
++            flow.append(PageBreak() if page_break_between else Spacer(1, 40))
++    doc.build(flow)
++    return buf.getvalue()
++
++
++def make_text_pdf(text: str = "No table here, only a sentence.") -> bytes:
++    from reportlab.lib.pagesizes import letter
++    from reportlab.pdfgen import canvas
++
++    buf = io.BytesIO()
++    c = canvas.Canvas(buf, pagesize=letter)
++    c.drawString(100, 750, text)
++    c.save()
++    return buf.getvalue()
++
++
++@pytest.fixture
++def pdf_path(tmp_path):
++    def _write(data: bytes, name: str = "t.pdf") -> Path:
++        p = tmp_path / name
++        p.write_bytes(data)
++        return p
++    return _write
+diff --git a/pyproject.toml b/pyproject.toml
+index bc658b0..2d10955 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -9,13 +9,19 @@ dependencies = [
+ ]
+ 
+ [project.optional-dependencies]
+-dev = ["pytest"]
++dev = ["pytest", "httpx", "reportlab"]
+ adapter = [
+     "scikit-learn>=1.5",
+     "scipy>=1.13",
+     "rasterio>=1.4",
+     "openpyxl>=3.1",
+     "joblib>=1.4",
++    "pdfplumber>=0.11",
++]
++api = [
++    "fastapi>=0.110",
++    "uvicorn>=0.29",
++    "python-multipart>=0.0.9",
+ ]
+ geo = ["shapely>=2.0", "pyproj>=3.6"]
+ 
+@@ -24,4 +30,7 @@ requires = ["setuptools>=61"]
+ build-backend = "setuptools.build_meta"
+ 
+ [tool.setuptools]
+-packages = ["loss_engine", "adapter"]
++packages = ["loss_engine", "adapter", "api"]
++
++[tool.setuptools.package-data]
++api = ["static/*.html"]
