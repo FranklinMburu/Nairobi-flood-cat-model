@@ -225,7 +225,21 @@ stage = extract_and_verify(document, provider, load_gazetteer("data"))   # stage
 # ... a human decides with approval.decide(...), then workflow.run_approved(stage, approval, ...)
 ```
 
-A structured file that is already in the Checkpoint 1 columns can go straight to `run_model`.
+Structured files take a different route: the exposure-file adapter (`adapter/`, below) maps a CSV,
+XLSX or GeoJSON file to the Checkpoint 1 columns, and its `adapted.csv` goes straight to `run_model`.
+
+## Exposure-file adapter
+
+`adapter/` (Phase 1) transforms an exposure file with arbitrary headers, units or row order
+(CSV, XLSX or GeoJSON points) into the Checkpoint 1 schema, with an `adaptation_report.json`
+audit trail, and checks the result with the Checkpoint 1 validator:
+
+```
+.venv\Scripts\python -m adapter.cli <input file> <output directory>
+```
+
+Reading `.xlsx` needs the optional `adapter` extra (openpyxl). Its tests are in `adapter/tests/`
+and use paths relative to the repository root, so run pytest from there.
 
 **Limitations.** Synthetic portfolio; susceptibility proxy, not depth or probability; H = 4 with
 2 and 6 as sensitivity; provisional class ceilings and D-004 return periods; structural
@@ -242,6 +256,7 @@ data/                  Source data as supplied by the organizers, unchanged
 loss_engine/           Python package: validation, configuration, vulnerability, building loss, aggregation, EP points,
                        run record, AI extraction, verification, approval, hazard lookup, workflow, demo
 examples/              Demonstration submission, hand-written replay fixture and review decisions
+adapter/               Exposure-file adapter (CSV / XLSX / GeoJSON -> Checkpoint 1 schema), with its tests
 tests/                 Tests for the package
 PROVENANCE.md          Hashes and facts for every source file
 requirements-lock.txt  Exact dependency versions the tests passed with
@@ -273,5 +288,7 @@ python -m venv .venv
 ```
 
 On macOS or Linux use `.venv/bin/python` instead. `requirements-lock.txt` pins the exact
-versions the test suite passed with. GitHub Actions runs the same steps on every push and
+versions the test suite passed with, including both optional extras: `geo` (rasterio, for the
+hazard lookup and the Checkpoint 8 workflow) and `adapter` (openpyxl, for `.xlsx` input). The core
+engine needs only numpy and pandas (`pip install -e .`); without an extra, its tests are skipped. GitHub Actions runs the same steps on every push and
 pull request (`.github/workflows/tests.yml`).

@@ -10,11 +10,17 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest"]
+# Hazard raster lookup (loss_engine.hazard_lookup, Checkpoint 8.3).
 geo = ["rasterio==1.5.2"]
+# Exposure-file adapter (adapter/): openpyxl reads .xlsx input through pandas.
+adapter = ["openpyxl==3.1.5"]
 
 [build-system]
 requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["loss_engine"]
+packages = ["loss_engine", "adapter"]
+
+[tool.setuptools.package-data]
+adapter = ["config/*.json", "data_manifest.json"]

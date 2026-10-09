@@ -1,0 +1,21 @@
+loc_id,lat,lon,housing_class,floor_area_m2,cost_per_m2_kes,tiv_kes,synthetic,source,hazard_score_common,hazard_score_occasional,hazard_score_moderate,hazard_score_severe,hazard_score_extreme
+NBO-0000,36.935883,-1.314897,semi_permanent,38,13600,5170000.0,True,"generated for hackathon starter kit, not a real portfolio",0.0232857968658208,0.0,0.0,0.0,0.0
+NBO-0001,36.789855,-1.219963,informal_iron_sheet,8,7800,625000.0,True,"generated for hackathon starter kit, not a real portfolio",0.0,0.0,0.0,0.0,0.0
+NBO-0002,36.896201,-1.257597,semi_permanent,33,10000,3300000.0,True,"generated for hackathon starter kit, not a real portfolio",0.4584057033061981,0.4072972238063812,0.3452048897743225,0.2472807019948959,0.1346025913953781
+NBO-0003,36.84782,-1.194103,semi_permanent,58,13700,7945000.0,True,"generated for hackathon starter kit, not a real portfolio",0.1139633804559707,0.0303510408848524,0.0,0.0,0.0
+NBO-0004,36.773582,-1.263191,semi_permanent,78,15900,12400000.0,True,"generated for hackathon starter kit, not a real portfolio",0.1406206041574478,0.0595238171517849,0.0,0.0,0.0
+NBO-0005,36.930681,-1.202301,informal_iron_sheet,16,9800,1570000.0,True,"generated for hackathon starter kit, not a real portfolio",0.6697713136672974,0.6386087536811829,0.6007488965988159,0.5410411357879639,0.4723374247550964
+NBO-0006,36.917333,-1.297331,informal_iron_sheet,11,5700,625000.0,True,"generated for hackathon starter kit, not a real portfolio",0.1324349194765091,0.0505656786262989,0.0,0.0,0.0
+NBO-0007,36.791035,-1.29008,informal_iron_sheet,10,6600,660000.0,True,"generated for hackathon starter kit, not a real portfolio",0.0,0.0,0.0,0.0,0.0
+NBO-0008,36.943294,-1.255438,semi_permanent,35,13200,4620000.0,True,"generated for hackathon starter kit, not a real portfolio",0.2259266525506973,0.152879923582077,0.0641344785690307,0.0,0.0
+NBO-0009,36.756131,-1.337945,permanent_masonry,77,55800,42965000.0,True,"generated for hackathon starter kit, not a real portfolio",0.0,0.0,0.0,0.0,0.0
+NBO-0010,36.901374,-1.275674,semi_permanent,30,13200,3960000.0,True,"generated for hackathon starter kit, not a real portfolio",0.0,0.0,0.0,0.0,0.0
+NBO-0011,36.870224,-1.198387,informal_iron_sheet,23,6100,1405000.0,True,"generated for hackathon starter kit, not a real portfolio",0.0079745389521121,0.0,0.0,0.0,0.0
+NBO-0012,36.817765,-1.238124,permanent_masonry,64,54900,35135000.0,True,"generated for hackathon starter kit, not a real portfolio",0.1145584806799888,0.0310022961348295,0.0,0.0,0.0
+NBO-0013,36.707701,-1.191036,informal_iron_sheet,10,5200,520000.0,True,"generated for hackathon starter kit, not a real portfolio",0.0,0.0,0.0,0.0,0.0
+NBO-0014,36.9237,-1.193437,semi_permanent,35,15500,5425000.0,True,"generated for hackathon starter kit, not a real portfolio",0.3153730928897857,0.2507671117782593,0.1722764670848846,0.0484909527003765,0.0
+NBO-0015,36.843408,-1.332391,permanent_masonry,98,35900,35180000.0,True,"generated for hackathon starter kit, not a real portfolio",0.0,0.0,0.0,0.0,0.0
+NBO-0016,36.797577,-1.306308,semi_permanent,37,13600,5030000.0,True,"generated for hackathon starter kit, not a real portfolio",0.0,0.0,0.0,0.0,0.0
+NBO-0017,36.78867,-1.224443,semi_permanent,39,13300,5185000.0,True,"generated for hackathon starter kit, not a real portfolio",0.0,0.0,0.0,0.0,0.0
+NBO-0018,36.862993,-1.274224,informal_iron_sheet,13,5500,715000.0,True,"generated for hackathon starter kit, not a real portfolio",0.0046982602216303,0.0,0.0,0.0,0.0
+NBO-0019,36.786757,-1.215378,semi_permanent,27,8000,2160000.0,True,"generated for hackathon starter kit, not a real portfolio",0.0,0.0,0.0,0.0,0.0
