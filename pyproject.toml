@@ -23,7 +23,7 @@ api = [
     "uvicorn>=0.29",
     "python-multipart>=0.0.9",
 ]
-geo = ["shapely>=2.0", "pyproj>=3.6"]
+geo = ["rasterio==1.5.2"]
 
 [build-system]
 requires = ["setuptools>=61"]
@@ -34,3 +34,4 @@ packages = ["loss_engine", "adapter", "api"]
 
 [tool.setuptools.package-data]
 api = ["static/*.html"]
+adapter = ["config/*.json", "data_manifest.json"]

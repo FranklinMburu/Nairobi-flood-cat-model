@@ -1,0 +1,8 @@
+SYNTHETIC DEMONSTRATION SUBMISSION - not a real client, broker or portfolio.
+Account: Demo Housing Account (fictional), Nairobi.
+
+1. Kayole: four reinforced concrete houses, each insured for KES 6,500,000, floor area 90 m2 per house.
+2. One masonry building at -1.2822, 36.8634 (Kiambiu), sum insured KSh 3,200,000. Deductible KES 50,000 per claim.
+3. Dandora: twelve mabati structures, total sum insured KES 9,600,000 for all twelve.
+
+Business interruption cover is requested but is not part of this schedule.

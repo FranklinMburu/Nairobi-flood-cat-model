@@ -1,6 +1,7 @@
 """Tests for adapter.profile module."""
 
 import json
+import importlib.util
 import tempfile
 from pathlib import Path
 
@@ -8,6 +9,10 @@ import pandas as pd
 import pytest
 
 from adapter.profile import profile_file, read_file, FileProfile
+
+# .xlsx input needs the optional "adapter" extra (openpyxl).
+needs_openpyxl = pytest.mark.skipif(importlib.util.find_spec("openpyxl") is None,
+                                    reason="openpyxl (the 'adapter' extra) is not installed")
 
 
 class TestReadFile:
@@ -17,6 +22,7 @@ class TestReadFile:
         assert len(df) == 20
         assert "loc_id" in df.columns
 
+    @needs_openpyxl
     def test_read_xlsx(self):
         df, fmt = read_file("adapter/tests/fixtures/adapter/xlsx_input.xlsx")
         assert fmt == "xlsx"
@@ -55,6 +61,7 @@ class TestProfileFile:
         assert "synthetic" in profile.synthetic_candidates
         assert len(profile.hazard_candidates) == 5
 
+    @needs_openpyxl
     def test_profile_xlsx(self):
         profile = profile_file("adapter/tests/fixtures/adapter/xlsx_input.xlsx")
         assert profile.format == "xlsx"

@@ -1,0 +1,10 @@
+{
+  "_note": "The reviewer's decisions for the demonstration. Item 3 states one total value for twelve buildings; a total is never split, so the item is excluded rather than given an invented per-building value.",
+  "acknowledged": [
+    "item-2|housing_class|mapping_needs_confirmation",
+    "item-2|insured_value|basis_unsupported"
+  ],
+  "corrections": [],
+  "excluded_items": ["item-3"],
+  "reason": "Item 2 class mapping (masonry) confirmed; its sum insured is for its one building. Item 3 excluded: total value for 12 buildings, no per-building value supplied."
+}

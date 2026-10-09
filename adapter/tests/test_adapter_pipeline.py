@@ -1,5 +1,6 @@
 """Tests for adapter.pipeline module."""
 
+import importlib.util
 import tempfile
 from pathlib import Path
 
@@ -9,6 +10,10 @@ import pytest
 from adapter.pipeline import adapt_file, AdaptationResult
 from adapter.config import AdapterConfig
 from loss_engine.validation import load_and_validate_exposure, ValidationError
+
+# .xlsx input needs the optional "adapter" extra (openpyxl).
+needs_openpyxl = pytest.mark.skipif(importlib.util.find_spec("openpyxl") is None,
+                                    reason="openpyxl (the 'adapter' extra) is not installed")
 
 
 class TestAdaptFile:
@@ -57,6 +62,7 @@ class TestAdaptFile:
             except ValidationError as e:
                 pytest.fail(f"Validator failed: {e}")
 
+    @needs_openpyxl
     def test_xlsx_input(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir = Path(tmpdir)

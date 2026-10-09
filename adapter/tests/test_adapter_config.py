@@ -72,7 +72,8 @@ class TestAdapterConfig:
 
     def test_resolve_model_path_absolute(self):
         config = AdapterConfig()
-        abs_path = Path("/absolute/path/model.joblib")
+        abs_path = Path(Path.cwd().anchor) / "absolute" / "path" / "model.joblib"  # absolute on every OS
+        assert abs_path.is_absolute()
         assert config.resolve_model_path(abs_path) == abs_path
 
     def test_resolve_model_path_relative(self):
