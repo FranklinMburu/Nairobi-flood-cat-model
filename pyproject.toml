@@ -9,18 +9,22 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest"]
-# Hazard raster lookup (loss_engine.hazard_lookup, Checkpoint 8.3).
+# Test tools; httpx2 is the transport of the API test client, reportlab writes the PDFs they upload.
+dev = ["pytest", "httpx2==2.13.1", "reportlab==5.0.1"]
+# Hazard raster lookup (loss_engine.hazard_lookup, Checkpoint 8.3) and the Checkpoint 8 workflow.
 geo = ["rasterio==1.5.2"]
-# Exposure-file adapter (adapter/): openpyxl reads .xlsx input through pandas.
-adapter = ["openpyxl==3.1.5"]
+# Exposure-file adapter (adapter/): openpyxl reads .xlsx and pdfplumber reads PDF tables.
+adapter = ["openpyxl==3.1.5", "pdfplumber==0.11.10"]
+# HTTP API (api/).
+api = ["fastapi==0.143.0", "uvicorn==0.54.0", "python-multipart==0.0.32"]
 
 [build-system]
 requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["loss_engine", "adapter"]
+packages = ["loss_engine", "adapter", "api"]
 
 [tool.setuptools.package-data]
 adapter = ["config/*.json", "data_manifest.json"]
+api = ["static/*.html"]

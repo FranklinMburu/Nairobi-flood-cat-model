@@ -288,7 +288,24 @@ python -m venv .venv
 ```
 
 On macOS or Linux use `.venv/bin/python` instead. `requirements-lock.txt` pins the exact
-versions the test suite passed with, including both optional extras: `geo` (rasterio, for the
-hazard lookup and the Checkpoint 8 workflow) and `adapter` (openpyxl, for `.xlsx` input). The core
-engine needs only numpy and pandas (`pip install -e .`); without an extra, its tests are skipped. GitHub Actions runs the same steps on every push and
-pull request (`.github/workflows/tests.yml`).
+versions the test suite passed with, including the optional extras: `geo` (rasterio, for the
+hazard lookup and the Checkpoint 8 workflow), `adapter` (openpyxl and pdfplumber, for `.xlsx` and
+PDF input) and `api` (fastapi, uvicorn, python-multipart). The core engine needs only numpy and
+pandas (`pip install -e .`); without an extra, the tests that need it are skipped. GitHub Actions
+runs the same steps on every push and pull request (`.github/workflows/tests.yml`).
+
+## Ingest API (PDF, CSV, XLSX, GeoJSON)
+
+```
+pip install -r requirements-lock.txt && pip install -e . --no-deps   # as in "Setup and tests"
+export ADAPTER_API_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+uvicorn api.main:app          # from the repo root; open http://localhost:8000/
+```
+
+- `POST /adapt` adapts a file and returns the adapted CSV and the adaptation report.
+- `POST /run` adapts the file, then runs the deterministic loss engine and returns its tables. The API never computes a loss itself.
+- Every request needs the `X-API-Key` header. The server refuses to start without `ADAPTER_API_KEY`.
+- Form fields: `file`, `synthetic` (`true`/`false`; required unless the file has a `synthetic` column), `fx_rate` (0 to 1000), `accept_uncertain`.
+- PDFs must contain a real table (no OCR for scans), at most 50 pages. The largest table is used and tables continuing across pages are joined. PDF headers are matched to canonical names through a synonym map (`adapter/pdf_tables.py`); each rename is listed in the report warnings. The synonym map applies to PDFs only.
+- The five `hazard_score_*` columns must be in the file; they are not derived from the rasters yet.
+- Limits: 10 MB upload, type detected from content (not filename), temp files deleted after each request, no server paths in responses.

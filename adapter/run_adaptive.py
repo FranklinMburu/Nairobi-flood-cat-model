@@ -7,6 +7,7 @@ import shutil
 import sys
 from pathlib import Path
 
+from adapter.config import AdapterConfig
 from adapter.pipeline import adapt_file
 from loss_engine.run_record import run_model, write_run, RunResult
 from loss_engine.config import default_config, ModelConfig
@@ -60,7 +61,7 @@ def main(argv: list[str] | None = None) -> int:
         synthetic=(args.synthetic.lower() == "true") if args.synthetic else None,
         fx_rate=args.fx_rate,
         accept_uncertain=args.accept_uncertain,
-        config_path=args.config,
+        config=AdapterConfig.load(config_path=args.config),
     )
 
     if adapter_result.status == "refused":

@@ -1,6 +1,6 @@
 """Nairobi Flood Model Data Adapter.
 
-Transforms arbitrary exposure files (CSV, XLSX, GeoJSON) into the canonical
+Transforms arbitrary exposure files (CSV, XLSX, GeoJSON, PDF tables) into the canonical
 schema required by the deterministic loss engine, with full audit trail.
 """
 
@@ -11,6 +11,7 @@ from .pipeline import adapt_file, AdaptationResult
 from .profile import profile_file, FileProfile
 from .normalize import normalize_values, verify_v7_order
 from .report import AdaptationReport, build_report
+from .pdf_tables import extract_table
 
 __version__ = "1.0.0"
 
@@ -26,4 +27,5 @@ __all__ = [
     "verify_v7_order",
     "AdaptationReport",
     "build_report",
+    "extract_table",
 ]

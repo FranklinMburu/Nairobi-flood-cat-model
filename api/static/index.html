@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nairobi Flood CAT Model - Exposure intake</title>
+
+<!-- Shared design system -->
+<style>
+:root {
+  --paper: #faf8f5; --surface: #ffffff; --ink: #1b1b1b; --muted: #5f5a54; --rule: #d9d3ca;
+  --accent: #12355b; --accent-ink: #ffffff; --ok: #1f5f3b; --ok-bg: #edf5ef;
+  --warn: #7a5200; --warn-bg: #fbf3e2; --bad: #8c1c13; --bad-bg: #fbeceb;
+  --serif: Georgia, "Times New Roman", serif;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+* { box-sizing: border-box; }
+html { font-size: 16px; }
+body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--sans); line-height: 1.5; }
+.wrap { max-width: 1040px; margin: 0 auto; padding: 40px 24px 80px; }
+.eyebrow { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px; }
+h1 { font-family: var(--serif); font-weight: 700; font-size: 32px; line-height: 1.2; margin: 0 0 8px; }
+h2 { font-family: var(--serif); font-weight: 700; font-size: 20px; margin: 0 0 12px; }
+.lede { color: var(--muted); max-width: 70ch; margin: 0 0 32px; }
+.panel { background: var(--surface); border: 1px solid var(--rule); border-radius: 4px; padding: 24px; margin-bottom: 24px; }
+label, .label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+.hint { font-size: 13px; color: var(--muted); margin: 6px 0 0; }
+input[type=text], input[type=password], select {
+  width: 100%; padding: 9px 10px; font: inherit; color: inherit; background: var(--surface);
+  border: 1px solid var(--rule); border-radius: 3px;
+}
+input:focus-visible, select:focus-visible, button:focus-visible, .drop:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn { font: inherit; font-weight: 600; padding: 10px 18px; border-radius: 3px; border: 1px solid var(--accent); cursor: pointer; }
+.btn-primary { background: var(--accent); color: var(--accent-ink); }
+.btn-secondary { background: var(--surface); color: var(--accent); }
+.btn[disabled] { opacity: .5; cursor: not-allowed; }
+.banner { border: 1px solid var(--rule); border-radius: 3px; padding: 12px 14px; margin-bottom: 20px; display: flex; gap: 10px; align-items: flex-start; }
+.banner svg { flex: none; margin-top: 2px; }
+.banner.ok { background: var(--ok-bg); border-color: var(--ok); color: var(--ok); }
+.banner.warn { background: var(--warn-bg); border-color: var(--warn); color: var(--warn); }
+.banner.bad { background: var(--bad-bg); border-color: var(--bad); color: var(--bad); }
+.banner p { margin: 0; color: var(--ink); }
+.banner strong { display: block; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; }
+caption { text-align: left; font-weight: 600; padding-bottom: 8px; }
+thead th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
+  border-top: 2px solid var(--ink); border-bottom: 1px solid var(--rule); padding: 8px 10px; }
+tbody td { border-bottom: 1px solid var(--rule); padding: 8px 10px; }
+th.num, td.num { text-align: right; }
+.table-scroll { overflow-x: auto; }
+ul.plain { margin: 0; padding-left: 18px; }
+ul.plain li { margin: 2px 0; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+</style>
+
+<!-- Page-specific -->
+<style>
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+@media (max-width: 720px) { .grid, .grid-3 { grid-template-columns: 1fr; } }
+.drop { display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; padding: 28px 16px;
+  border: 1.5px dashed var(--muted); border-radius: 4px; cursor: pointer; background: var(--paper); }
+.drop.over { background: #f0ebe3; }
+.drop svg { color: var(--accent); }
+.drop .name { font-weight: 600; word-break: break-all; }
+.row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-top: 20px; }
+.check { display: flex; align-items: center; gap: 8px; font-weight: 400; margin: 0; }
+.figure { border-top: 2px solid var(--ink); padding-top: 8px; }
+.figure .v { font-family: var(--serif); font-size: 28px; font-weight: 700; }
+.figure .k { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.toolbar { display: flex; gap: 16px; flex-wrap: wrap; align-items: end; margin-bottom: 16px; }
+.toolbar > div { min-width: 200px; }
+.note { font-size: 13px; color: var(--muted); }
+details summary { cursor: pointer; font-weight: 600; }
+#results[hidden], #status[hidden] { display: none; }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <p class="eyebrow">Team A &middot; Nairobi Urban Flood Challenge</p>
+  <h1>Exposure intake and loss run</h1>
+  <p class="lede">Upload an exposure schedule as a PDF table, CSV, XLSX or GeoJSON. The adapter converts it to the model schema and records every change; the deterministic loss engine then calculates all losses. This page only displays what the backend returns.</p>
+
+  <section class="panel" aria-labelledby="upload-h">
+    <h2 id="upload-h">1. Upload</h2>
+    <div class="grid">
+      <div>
+        <span class="label">Exposure file</span>
+        <label class="drop" id="drop" for="file">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4"/><path d="M7 9l5-5 5 5"/><path d="M5 20h14"/></svg>
+          <span class="name" id="fname">Choose a file or drop it here</span>
+          <span class="note">PDF (text tables only, no scans), CSV, XLSX, GeoJSON. Up to 10 MB.</span>
+          <input class="sr-only" type="file" id="file" accept=".pdf,.csv,.xlsx,.geojson,.json">
+        </label>
+      </div>
+      <div>
+        <label for="synthetic">Is this portfolio synthetic?</label>
+        <select id="synthetic">
+          <option value="">Use the file's synthetic column</option>
+          <option value="true">Declare as synthetic</option>
+          <option value="false">Declare as real</option>
+        </select>
+        <p class="hint">The model refuses data whose synthetic status is not stated.</p>
+        <div style="margin-top:16px">
+          <label for="key">API key</label>
+          <input type="password" id="key" autocomplete="off" placeholder="Value of ADAPTER_API_KEY">
+          <p class="hint">Kept in this page's memory only; never stored.</p>
+        </div>
+        <div style="margin-top:16px">
+          <label class="check"><input type="checkbox" id="accept"> Accept uncertain mappings without confirmation</label>
+        </div>
+      </div>
+    </div>
+    <div class="row">
+      <button class="btn btn-primary" id="run" type="button">Run loss model</button>
+      <button class="btn btn-secondary" id="adapt" type="button">Adapt only</button>
+    </div>
+  </section>
+
+  <div id="status" hidden></div>
+
+  <div id="results" hidden>
+    <section class="panel" aria-labelledby="in-h">
+      <h2 id="in-h">2. How the file was read</h2>
+      <div class="grid-3" id="figures"></div>
+      <div id="adapt-notes" style="margin-top:20px"></div>
+    </section>
+
+    <section class="panel" id="model" aria-labelledby="out-h" hidden>
+      <h2 id="out-h">3. Model output</h2>
+      <div class="toolbar">
+        <div><label for="scenario">Scenario</label><select id="scenario"></select></div>
+        <div><label for="tier">Hazard tier (class table)</label><select id="tier"></select></div>
+      </div>
+      <div class="table-scroll" id="t-tier"></div>
+      <div class="table-scroll" id="t-ep" style="margin-top:28px"></div>
+      <div class="table-scroll" id="t-class" style="margin-top:28px"></div>
+      <details style="margin-top:28px"><summary>Validation rules (<span id="vcount"></span>)</summary><div class="table-scroll" id="t-val" style="margin-top:12px"></div></details>
+      <p class="note" style="margin-top:20px">All figures are calculated by the backend loss engine from the adapted file. Synthetic inputs are not a real insurer portfolio.</p>
+    </section>
+  </div>
+</main>
+
+<script>
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+  var state = { file: null, data: null };
+  var ICONS = {
+    ok: '<path d="M20 6L9 17l-5-5"/>',
+    warn: '<path d="M12 3l10 18H2L12 3z"/><path d="M12 10v5"/><path d="M12 18h.01"/>',
+    bad: '<circle cx="12" cy="12" r="9"/><path d="M15 9l-6 6"/><path d="M9 9l6 6"/>'
+  };
+
+  function el(tag, attrs, kids) {
+    var n = document.createElement(tag);
+    Object.keys(attrs || {}).forEach(function (k) {
+      if (k === "class") n.className = attrs[k]; else n.setAttribute(k, attrs[k]);
+    });
+    [].concat(kids === undefined ? [] : kids).forEach(function (c) {
+      n.appendChild(typeof c === "string" ? document.createTextNode(c) : c);
+    });
+    return n;
+  }
+  function svg(kind) {
+    var s = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    ["width", "height"].forEach(function (a) { s.setAttribute(a, "20"); });
+    s.setAttribute("viewBox", "0 0 24 24"); s.setAttribute("fill", "none"); s.setAttribute("stroke", "currentColor");
+    s.setAttribute("stroke-width", "1.8"); s.setAttribute("stroke-linecap", "round"); s.setAttribute("stroke-linejoin", "round");
+    s.setAttribute("aria-hidden", "true"); s.innerHTML = ICONS[kind]; return s;
+  }
+  var nf0 = new Intl.NumberFormat("en-KE", { maximumFractionDigits: 0 });
+  var pct = function (v) { return v == null ? "" : (v * 100).toFixed(2) + "%"; };
+  var kes = function (v) { return v == null ? "" : nf0.format(v); };
+
+  function banner(kind, title, lines) {
+    var box = $("status"); box.hidden = false; box.replaceChildren();
+    var body = el("div", {}, [el("strong", {}, title)].concat((lines || []).map(function (l) { return el("p", {}, l); })));
+    box.appendChild(el("div", { "class": "banner " + kind, role: kind === "bad" ? "alert" : "status" }, [svg(kind), body]));
+  }
+
+  function table(caption, cols, rows) {
+    var head = el("tr", {}, cols.map(function (c) { return el("th", { "class": c.num ? "num" : "", scope: "col" }, c.label); }));
+    var body = rows.map(function (r) {
+      return el("tr", {}, cols.map(function (c) { return el("td", { "class": c.num ? "num" : "" }, String(c.get(r))); }));
+    });
+    return el("table", {}, [el("caption", {}, caption), el("thead", {}, head), el("tbody", {}, body)]);
+  }
+
+  function figure(k, v) { return el("div", { "class": "figure" }, [el("div", { "class": "v" }, String(v)), el("div", { "class": "k" }, k)]); }
+
+  function listBlock(title, items) {
+    if (!items || !items.length) return null;
+    return el("div", { style: "margin-top:12px" }, [el("div", { "class": "label" }, title),
+      el("ul", { "class": "plain" }, items.map(function (i) { return el("li", {}, i); }))]);
+  }
+
+  function renderAdaptation(report, status) {
+    var f = $("figures"); f.replaceChildren();
+    var prof = (report.original_file || {}).profile || {};
+    f.appendChild(figure("Source format", (prof.format || "").toUpperCase()));
+    f.appendChild(figure("Rows read", prof.n_rows != null ? nf0.format(prof.n_rows) : ""));
+    f.appendChild(figure("Adapter status", status));
+    var notes = $("adapt-notes"); notes.replaceChildren();
+    var blocks = [
+      listBlock("Refusal reasons", report.refusal_reasons),
+      listBlock("Needs your confirmation", (report.needs_confirmation_proposals || []).map(function (p) {
+        return p.message || (p.type + ": " + JSON.stringify(p).slice(0, 160));
+      })),
+      listBlock("Notes on the file", prof.warnings),
+      listBlock("Rows flagged", Object.entries((report.flagged_rows || []).reduce(function (a, r) { a[r.reason] = (a[r.reason] || 0) + 1; return a; }, {}))
+        .map(function (e) { return e[1] + " row(s): " + e[0]; }))
+    ];
+    blocks.forEach(function (b) { if (b) notes.appendChild(b); });
+  }
+
+  function fillSelect(sel, values, keep) {
+    sel.replaceChildren();
+    values.forEach(function (v) { sel.appendChild(el("option", { value: v }, v)); });
+    if (keep && values.indexOf(keep) >= 0) sel.value = keep;
+  }
+
+  function renderModel(d) {
+    $("model").hidden = false;
+    var scenarios = Array.from(new Set(d.tier_summary.map(function (r) { return r.scenario_id; })));
+    var tiers = Array.from(new Set(d.tier_summary.map(function (r) { return r.tier; })));
+    fillSelect($("scenario"), scenarios, scenarios.indexOf("reference") >= 0 ? "reference" : scenarios[0]);
+    fillSelect($("tier"), tiers, $("tier").value);
+    drawTables();
+    var vt = table("", [
+      { label: "Rule", get: function (r) { return r.rule; } },
+      { label: "Stage", get: function (r) { return r.stage; } },
+      { label: "Status", get: function (r) { return r.status; } },
+      { label: "Detail", get: function (r) { return r.detail || ""; } }
+    ], d.validation_results);
+    $("vcount").textContent = d.validation_results.length + " checks";
+    $("t-val").replaceChildren(vt);
+  }
+
+  function drawTables() {
+    var d = state.data; if (!d || !d.tier_summary) return;
+    var sc = $("scenario").value, tier = $("tier").value;
+    $("t-tier").replaceChildren(table("Loss by hazard tier - scenario " + sc, [
+      { label: "Tier", get: function (r) { return r.tier; } },
+      { label: "Buildings", num: 1, get: function (r) { return nf0.format(r.buildings); } },
+      { label: "Affected", num: 1, get: function (r) { return nf0.format(r.affected_buildings); } },
+      { label: "Affected TIV (KES)", num: 1, get: function (r) { return kes(r.affected_tiv_kes); } },
+      { label: "Portfolio loss (KES)", num: 1, get: function (r) { return kes(r.portfolio_loss_kes); } },
+      { label: "Loss, % of portfolio", num: 1, get: function (r) { return pct(r.loss_pct_portfolio); } }
+    ], d.tier_summary.filter(function (r) { return r.scenario_id === sc; })));
+    $("t-ep").replaceChildren(table("Exceedance probability points - scenario " + sc, [
+      { label: "Tier", get: function (r) { return r.tier; } },
+      { label: "Return period (years)", num: 1, get: function (r) { return r.return_period_years; } },
+      { label: "Annual exceedance probability", num: 1, get: function (r) { return pct(r.annual_exceedance_probability); } },
+      { label: "Portfolio loss (KES)", num: 1, get: function (r) { return kes(r.portfolio_loss_kes); } },
+      { label: "Loss, % of portfolio", num: 1, get: function (r) { return pct(r.loss_pct_portfolio); } }
+    ], d.ep_points.filter(function (r) { return r.scenario_id === sc; })));
+    $("t-class").replaceChildren(table("Loss by housing class - " + tier + " tier, scenario " + sc, [
+      { label: "Housing class", get: function (r) { return r.housing_class; } },
+      { label: "Buildings", num: 1, get: function (r) { return nf0.format(r.buildings); } },
+      { label: "Affected", num: 1, get: function (r) { return nf0.format(r.affected_buildings); } },
+      { label: "Loss (KES)", num: 1, get: function (r) { return kes(r.loss_kes); } },
+      { label: "Loss ratio", num: 1, get: function (r) { return pct(r.loss_ratio); } },
+      { label: "Share of tier loss", num: 1, get: function (r) { return pct(r.share_of_tier_loss); } }
+    ], d.class_summary.filter(function (r) { return r.scenario_id === sc && r.tier === tier; })));
+  }
+
+  function send(path) {
+    if (!state.file) { banner("warn", "Choose a file first."); return; }
+    if (!$("key").value) { banner("warn", "Enter the API key."); return; }
+    var fd = new FormData();
+    fd.append("file", state.file);
+    if ($("synthetic").value) fd.append("synthetic", $("synthetic").value);
+    if ($("accept").checked) fd.append("accept_uncertain", "true");
+    $("run").disabled = $("adapt").disabled = true;
+    $("results").hidden = true; $("model").hidden = true;
+    banner("warn", "Working", ["Reading the file" + (path === "/run" ? " and running the loss model." : ".")]);
+    fetch(path, { method: "POST", headers: { "X-API-Key": $("key").value }, body: fd })
+      .then(function (res) { return res.json().then(function (j) { return { code: res.status, body: j }; }, function () { return { code: res.status, body: {} }; }); })
+      .then(function (r) { handle(path, r.code, r.body); })
+      .catch(function () { banner("bad", "Could not reach the server."); })
+      .then(function () { $("run").disabled = $("adapt").disabled = false; });
+  }
+
+  function handle(path, code, b) {
+    state.data = b;
+    if (code === 401) return banner("bad", "The API key was not accepted.");
+    if (code === 413) return banner("bad", "The file is larger than 10 MB.");
+    if (code === 415) return banner("bad", "That file type is not supported.", [b.detail || ""]);
+    if (code === 429 || code >= 500) return banner("bad", "The server could not process the request.", [b.detail || ""]);
+    if (b.detail && !b.report && !b.adaptation_report) return banner("bad", "The file could not be used.", [typeof b.detail === "string" ? b.detail : "Check the form fields."]);
+    var report = b.report || b.adaptation_report || {};
+    var status = b.status || b.adapter_status || "";
+    $("results").hidden = false;
+    renderAdaptation(report, status);
+    if (path === "/adapt") {
+      $("model").hidden = true;
+      if (status === "refused") banner("bad", "The adapter refused this file.", ["The reasons are listed below; nothing was guessed."]);
+      else if (status === "needs_confirmation") banner("warn", "The adapter needs confirmation.", ["Review the proposals below, then tick the accept box or fix the file."]);
+      else banner("ok", "File adapted.", ["The adapted file meets the model schema. Use Run loss model to calculate losses."]);
+      return;
+    }
+    if (b.run_status === "completed") { banner("ok", "Loss model completed.", ["Run " + b.run_id + " - " + nf0.format(b.row_count) + " buildings, total insured value KES " + kes(Number(b.total_insured_value || b.total_tiv_kes)) + "."]); renderModel(b); return; }
+    if (b.run_status === "failed") return banner("bad", "The loss engine stopped on a failed rule.", ["Rule stage: " + b.failed_at, b.failure || ""]);
+    if (status === "refused") return banner("bad", "The adapter refused this file, so the model was not run.");
+    banner("warn", "The model was not run.", [b.message || "The adapter needs confirmation."]);
+  }
+
+  function setFile(f) { state.file = f; $("fname").textContent = f ? f.name + " (" + Math.ceil(f.size / 1024) + " KB)" : "Choose a file or drop it here"; }
+  $("file").addEventListener("change", function (e) { setFile(e.target.files[0] || null); });
+  var drop = $("drop");
+  ["dragenter", "dragover"].forEach(function (t) { drop.addEventListener(t, function (e) { e.preventDefault(); drop.classList.add("over"); }); });
+  ["dragleave", "drop"].forEach(function (t) { drop.addEventListener(t, function (e) { e.preventDefault(); drop.classList.remove("over"); }); });
+  drop.addEventListener("drop", function (e) { if (e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]); });
+  $("run").addEventListener("click", function () { send("/run"); });
+  $("adapt").addEventListener("click", function () { send("/adapt"); });
+  $("scenario").addEventListener("change", drawTables);
+  $("tier").addEventListener("change", drawTables);
+})();
+</script>
+</body>
+</html>
