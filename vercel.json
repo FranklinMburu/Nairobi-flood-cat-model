@@ -7,6 +7,7 @@
     },
     "django": {
       "root": "backend/",
+      "entrypoint": "config.wsgi:application",
       "buildCommand": "rm -rf _shared && mkdir _shared && cp -R ../loss_engine ../data ../examples _shared/"
     }
   },
