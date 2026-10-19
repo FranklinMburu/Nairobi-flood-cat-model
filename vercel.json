@@ -8,7 +8,7 @@
     "django": {
       "root": "backend/",
       "entrypoint": "config.wsgi:application",
-      "buildCommand": "rm -rf _shared && mkdir _shared && cp -R ../loss_engine ../data ../examples _shared/"
+      "buildCommand": "rm -rf _shared && mkdir -p _shared/lib && cp -R ../loss_engine ../data ../examples _shared/ && for p in /usr/lib64/libexpat.so.1 /lib64/libexpat.so.1 /usr/lib/x86_64-linux-gnu/libexpat.so.1; do if [ -f $p ]; then cp -L $p _shared/lib/ && break; fi; done && ls -l _shared/lib"
     }
   },
   "rewrites": [

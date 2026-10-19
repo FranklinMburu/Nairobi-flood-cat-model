@@ -17,8 +17,26 @@ from django.core.management import call_command
 DEMO_PASSWORD_VALUE = "!presentation-demo-no-password"
 
 
+def load_bundled_libraries() -> None:
+    """Load system libraries the Vercel runtime lacks, before rasterio is imported.
+
+    rasterio's wheel bundles GDAL, which needs libexpat.so.1 from the system.
+    Vercel's build image has it, its function runtime does not, so the build
+    copies it into _shared/lib (vercel.json). Loading it globally here lets
+    GDAL find it by name when rasterio is imported later.
+    """
+    import ctypes
+
+    from config.paths import REPO_ROOT
+
+    for library in sorted((REPO_ROOT / "lib").glob("*.so*")):
+        ctypes.CDLL(str(library), mode=ctypes.RTLD_GLOBAL)
+
+
 def prepare() -> None:
     from django.conf import settings
+
+    load_bundled_libraries()
 
     from accounts.models import User
     from accounts.views import DEMO_EMAIL
