@@ -324,6 +324,7 @@ def run(request, extraction_id):
     except (AssemblyError, HazardLookupError) as exc:
         return error(str(exc), 422)
     except ImportError:
+        logger.exception("Hazard rasters unavailable: importing rasterio failed")
         return error("The hazard rasters cannot be read: the 'geo' extra (rasterio) is not installed.", 503)
     except RuntimeError as exc:  # an engine run stopped on a failed rule
         return error(str(exc), 422)
