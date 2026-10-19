@@ -1,0 +1,17 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "services": {
+    "web": {
+      "root": "frontend/",
+      "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+    },
+    "django": {
+      "root": "backend/",
+      "buildCommand": "rm -rf _shared && mkdir _shared && cp -R ../loss_engine ../data ../examples _shared/"
+    }
+  },
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": { "service": "django" } },
+    { "source": "/(.*)", "destination": { "service": "web" } }
+  ]
+}

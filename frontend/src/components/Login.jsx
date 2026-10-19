@@ -7,6 +7,8 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export function Login() {
   const {
     login,
+    demoLogin,
+    demoLoginEnabled,
     sendOtp,
     resendOtp,
     verifyOtp,
@@ -55,6 +57,19 @@ export function Login() {
     try {
       await login({ email: trimmed, password });
       setPassword("");
+    } catch (reason) {
+      setError(reason.message);
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function onDemoLogin() {
+    if (pending) return;
+    setError("");
+    setPending(true);
+    try {
+      await demoLogin();
     } catch (reason) {
       setError(reason.message);
     } finally {
@@ -224,6 +239,11 @@ export function Login() {
         <button className="auth-submit" type="submit" disabled={pending}>
           {pending ? "Signing in..." : "Sign in"}
         </button>
+        {demoLoginEnabled ? (
+          <button className="auth-link" type="button" onClick={onDemoLogin} disabled={pending}>
+            {pending ? "Starting presentation..." : "Enter presentation demo"}
+          </button>
+        ) : null}
       </form>
     </AuthScreen>
   );

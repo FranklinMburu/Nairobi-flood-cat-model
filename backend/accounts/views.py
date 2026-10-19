@@ -1,7 +1,9 @@
 """Session authentication API. Loss calculations stay in loss_engine."""
 
 import json
+import ipaddress
 
+from django.conf import settings
 from django.contrib.auth import login, logout
 from django.http import JsonResponse
 from django.middleware.csrf import get_token
@@ -11,6 +13,8 @@ from django.views.decorators.http import require_GET, require_POST
 from .audit import LOGIN_FAILED, LOGIN_SUCCEEDED, PASSWORD_ACCEPTED, record
 from .models import SecuritySettings, User
 from .otp import OtpError, begin_challenge, challenge_payload, load_challenge, send_code, usable_methods, verify_code
+
+DEMO_EMAIL = "presentation-demo@demo.invalid"
 
 
 def csrf_failure(request, reason=""):
@@ -44,6 +48,50 @@ def text_field(data, key):
 @ensure_csrf_cookie
 def csrf(request):
     return JsonResponse({"csrfToken": get_token(request)})
+
+
+def demo_login_is_available(request):
+    if not settings.DEMO_LOGIN_ENABLED:
+        return False
+    # The public live demo (BRIEF.md): anyone may enter as Presentation Demo,
+    # a non-staff account with no password, whose data resets.
+    if getattr(settings, "ON_VERCEL", False):
+        return True
+    # Locally: only with debug on, and only from this machine.
+    if not settings.DEBUG:
+        return False
+    try:
+        return ipaddress.ip_address(request.META.get("REMOTE_ADDR", "")).is_loopback
+    except ValueError:
+        return False
+
+
+@require_GET
+def demo_mode(request):
+    enabled = demo_login_is_available(request)
+    live = enabled and getattr(settings, "ON_VERCEL", False)
+    # "auto": the interface signs the visitor in without showing the sign-in
+    # screen. "temporary": it tells them demo data resets.
+    return JsonResponse({"enabled": enabled, "auto": live, "temporary": live})
+
+
+@require_POST
+def demo_login(request):
+    if not demo_login_is_available(request):
+        return JsonResponse({"error": "Presentation login is not enabled."}, status=404)
+
+    user, created = User.objects.get_or_create(
+        email=DEMO_EMAIL,
+        defaults={"name": "Presentation Demo", "is_staff": False},
+    )
+    if created:
+        user.set_unusable_password()
+        user.save(update_fields=["password"])
+    elif not user.is_active or user.is_staff or user.is_superuser:
+        return JsonResponse({"error": "The presentation account is unavailable."}, status=503)
+
+    login(request, user, backend="django.contrib.auth.backends.ModelBackend")
+    return JsonResponse(user_payload(user))
 
 
 @require_POST

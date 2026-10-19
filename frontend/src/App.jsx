@@ -14,7 +14,7 @@ import { mapController } from "./map/controller";
 import { loadPortfolio } from "./services/api";
 
 export default function App() {
-  const { user, logout } = useAuth();
+  const { user, logout, demoDataTemporary } = useAuth();
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [page, setPage] = useState("overview");
@@ -84,6 +84,7 @@ export default function App() {
         signingOut={signingOut}
         signOutError={signOutError}
         scenario={data.scenarios.find((s) => s.id === assumption)}
+        demoDataTemporary={demoDataTemporary}
       />
       <main className="main">
         <div className={page === "map" ? "map-layer" : "map-layer idle"}>

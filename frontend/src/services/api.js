@@ -101,6 +101,14 @@ export async function getCurrentUser() {
   return response.json();
 }
 
+export async function getDemoMode() {
+  return readJson(await request("/api/auth/demo-mode/"));
+}
+
+export async function startDemoSession() {
+  return readJson(await postJson("/api/auth/demo-login/", {}));
+}
+
 export async function login(credentials) {
   return readJson(await postJson("/api/auth/login/", credentials));
 }

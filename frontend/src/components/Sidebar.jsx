@@ -11,7 +11,7 @@ const ITEMS = [
   ["runs", "Model runs"],
 ];
 
-export function Sidebar({ page, onNavigate, user, onSignOut, signingOut, signOutError, scenario }) {
+export function Sidebar({ page, onNavigate, user, onSignOut, signingOut, signOutError, scenario, demoDataTemporary }) {
   const { navigate } = useRouter();
   return (
     <aside className="sidebar">
@@ -32,6 +32,11 @@ export function Sidebar({ page, onNavigate, user, onSignOut, signingOut, signOut
         ))}
       </nav>
       <div className="sidebar-bottom">
+        {demoDataTemporary ? (
+          <p className="demo-notice" role="note">
+            Live demo. Submissions, approvals and runs you make here are temporary and reset when the server restarts.
+          </p>
+        ) : null}
         <div className="sidebar-user">
           <strong>{user.name}</strong>
           <span title={user.email}>{user.email}</span>

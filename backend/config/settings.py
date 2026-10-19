@@ -4,8 +4,13 @@ import os
 import sys
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parents[1]
-REPO_ROOT = BASE_DIR.parent
+from django.core.exceptions import ImproperlyConfigured
+
+from .paths import BACKEND_DIR as BASE_DIR, REPO_ROOT
+
+# Vercel sets VERCEL=1 in its builds and functions. The live demo's settings
+# are at the end of this file; nothing else changes locally.
+ON_VERCEL = bool(os.environ.get("VERCEL"))
 
 
 def load_env_file(path):
@@ -56,6 +61,7 @@ def env_list(name, default):
 
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "hackathon-cat-intelligence-not-for-production")
 DEBUG = env_bool("DJANGO_DEBUG", True)
+DEMO_LOGIN_ENABLED = env_bool("DEMO_LOGIN_ENABLED", False)
 ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", ["127.0.0.1", "localhost"])
 
 INSTALLED_APPS = [
@@ -147,3 +153,31 @@ WORKFLOW_REPLAY_RECORD = REPO_ROOT / "examples" / "demo_replay_record.json"
 
 # The file upload service (api/main.py, FastAPI). Its key stays on the server.
 INGEST_API_URL = os.environ.get("INGEST_API_URL", "http://127.0.0.1:8001")
+
+# --- Live demo on Vercel (BRIEF.md) -----------------------------------------
+# One Django function behind /api on the same HTTPS address as the frontend.
+# Only /tmp is writable there, and it is empty whenever Vercel starts a new
+# instance: the SQLite database and the workflow folder live there and are
+# rebuilt on start-up (config/startup.py). Sessions are signed cookies, so a
+# visitor stays signed in whichever instance answers.
+if ON_VERCEL:
+    if not os.environ.get("DJANGO_SECRET_KEY"):
+        raise ImproperlyConfigured("Set DJANGO_SECRET_KEY in the Vercel project's environment variables.")
+    DEBUG = False
+    ALLOWED_HOSTS = [".vercel.app"]
+    CSRF_TRUSTED_ORIGINS = ["https://*.vercel.app"]
+    CORS_ALLOWED_ORIGINS = []
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    CSRF_COOKIE_SECURE = True
+    SESSION_COOKIE_SECURE = True
+    SESSION_ENGINE = "django.contrib.sessions.backends.signed_cookies"
+    DATABASES["default"]["NAME"] = Path("/tmp/dira-demo.sqlite3")
+    WORKFLOW_STORE_DIR = Path("/tmp/dira-workflow")
+    # With DEBUG off Django logs nothing by default; send errors to the
+    # function log. Visitors still get a plain error page with no trace.
+    LOGGING = {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "handlers": {"console": {"class": "logging.StreamHandler"}},
+        "loggers": {"django": {"handlers": ["console"], "level": "WARNING"}},
+    }

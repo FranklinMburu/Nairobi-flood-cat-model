@@ -5,7 +5,7 @@ from datetime import timedelta
 from unittest.mock import patch
 
 from django.core import mail
-from django.test import Client, TestCase
+from django.test import Client, TestCase, override_settings
 from django.utils import timezone
 
 from accounts.audit import (
@@ -125,6 +125,111 @@ class SessionTests(TestCase):
 
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.json(), {"error": "Authentication required."})
+
+
+class DemoLoginTests(TestCase):
+    @override_settings(DEBUG=True, DEMO_LOGIN_ENABLED=True)
+    def test_demo_login_creates_non_staff_session_for_local_client(self):
+        self.assertTrue(self.client.get("/api/auth/demo-mode/").json()["enabled"])
+
+        response = post_json(self.client, "/api/auth/demo-login/", {})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["email"], "presentation-demo@demo.invalid")
+        self.assertFalse(response.json()["is_staff"])
+        self.assertIn("_auth_user_id", self.client.session)
+        self.assertFalse(User.objects.get(email=response.json()["email"]).has_usable_password())
+
+    @override_settings(DEBUG=True, DEMO_LOGIN_ENABLED=False)
+    def test_demo_login_is_disabled_by_default(self):
+        self.assertFalse(self.client.get("/api/auth/demo-mode/").json()["enabled"])
+
+        response = post_json(self.client, "/api/auth/demo-login/", {})
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(User.objects.filter(email="presentation-demo@demo.invalid").exists())
+
+    @override_settings(DEBUG=False, DEMO_LOGIN_ENABLED=True)
+    def test_demo_login_is_disabled_when_debug_is_off(self):
+        response = post_json(self.client, "/api/auth/demo-login/", {})
+
+        self.assertEqual(response.status_code, 404)
+
+    @override_settings(DEBUG=True, DEMO_LOGIN_ENABLED=True)
+    def test_demo_login_rejects_non_loopback_clients(self):
+        client = Client(REMOTE_ADDR="203.0.113.5")
+
+        response = post_json(client, "/api/auth/demo-login/", {})
+
+        self.assertEqual(response.status_code, 404)
+
+    @override_settings(DEBUG=True, DEMO_LOGIN_ENABLED=True)
+    def test_demo_login_requires_csrf_token(self):
+        client = Client(enforce_csrf_checks=True)
+
+        blocked = post_json(client, "/api/auth/demo-login/", {})
+        issued = client.get("/api/auth/csrf/")
+        allowed = post_json(
+            client,
+            "/api/auth/demo-login/",
+            {},
+            HTTP_X_CSRFTOKEN=issued.json()["csrfToken"],
+        )
+
+        self.assertEqual(blocked.status_code, 403)
+        self.assertEqual(allowed.status_code, 200)
+
+
+class LiveDemoTests(TestCase):
+    """The public demo on Vercel (BRIEF.md): ON_VERCEL is set there, DEBUG is off."""
+
+    @override_settings(ON_VERCEL=True, DEBUG=False, DEMO_LOGIN_ENABLED=True)
+    def test_any_visitor_enters_demo_automatically(self):
+        client = Client(REMOTE_ADDR="203.0.113.5")
+
+        mode = client.get("/api/auth/demo-mode/").json()
+        response = post_json(client, "/api/auth/demo-login/", {})
+
+        self.assertEqual(mode, {"enabled": True, "auto": True, "temporary": True})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["name"], "Presentation Demo")
+        self.assertFalse(response.json()["is_staff"])
+
+    @override_settings(ON_VERCEL=True, DEBUG=False, DEMO_LOGIN_ENABLED=False)
+    def test_live_demo_stays_off_without_the_switch(self):
+        mode = Client().get("/api/auth/demo-mode/").json()
+        response = post_json(Client(), "/api/auth/demo-login/", {})
+
+        self.assertEqual(mode, {"enabled": False, "auto": False, "temporary": False})
+        self.assertEqual(response.status_code, 404)
+
+    @override_settings(DEBUG=True, DEMO_LOGIN_ENABLED=True)
+    def test_local_demo_is_not_automatic(self):
+        mode = self.client.get("/api/auth/demo-mode/").json()
+
+        self.assertEqual(mode, {"enabled": True, "auto": False, "temporary": False})
+
+    def test_startup_seeds_the_same_demo_user_every_time(self):
+        from config.startup import DEMO_PASSWORD_VALUE, prepare
+
+        with self.settings(WORKFLOW_STORE_DIR=self._tmp()):
+            prepare()
+            first = User.objects.get(email="presentation-demo@demo.invalid")
+            prepare()
+            second = User.objects.get(email="presentation-demo@demo.invalid")
+
+        self.assertEqual(first.pk, second.pk)
+        self.assertEqual(second.password, DEMO_PASSWORD_VALUE)
+        self.assertFalse(second.has_usable_password())
+        self.assertFalse(second.is_staff)
+
+    def _tmp(self):
+        import tempfile
+        from pathlib import Path
+
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        return Path(directory.name) / "workflow"
 
 
 class CsrfTests(TestCase):

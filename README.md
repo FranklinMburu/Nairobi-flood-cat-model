@@ -37,6 +37,12 @@ copy .env.example .env          # then set DJANGO_SECRET_KEY and ADAPTER_API_KEY
 .venv\Scripts\python backend\manage.py createsuperuser
 ```
 
+For a local presentation without a personal account, set `DEMO_LOGIN_ENABLED=true`
+in `.env` and restart the app. The sign-in screen then offers **Enter presentation
+demo**, which creates a non-staff demo session. This is available only with
+`DJANGO_DEBUG=true` and requests from the local machine; it is not a production
+authentication option.
+
 Start everything (Ctrl+C stops all three):
 
 ```

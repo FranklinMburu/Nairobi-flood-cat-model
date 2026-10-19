@@ -2,10 +2,12 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import {
   getCsrfToken,
   getCurrentUser,
+  getDemoMode,
   login as loginRequest,
   logout as logoutRequest,
   resendOtp as resendRequest,
   sendOtp as sendRequest,
+  startDemoSession,
   verifyOtp as verifyRequest,
 } from "../services/api";
 
@@ -25,6 +27,8 @@ function challengeFrom(body) {
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [demoLoginEnabled, setDemoLoginEnabled] = useState(false);
+  const [demoDataTemporary, setDemoDataTemporary] = useState(false);
   const [challenge, setChallenge] = useState(null);
 
   const refreshUser = useCallback(async () => {
@@ -38,8 +42,16 @@ export function AuthProvider({ children }) {
     (async () => {
       try {
         await getCsrfToken();
-        const next = await getCurrentUser();
-        if (!cancelled) setUser(next);
+        const [current, demoMode] = await Promise.all([getCurrentUser(), getDemoMode()]);
+        let next = current;
+        // The public live demo: the server says "auto", so the visitor goes
+        // straight in as Presentation Demo with no sign-in screen.
+        if (!next && demoMode.auto) next = await startDemoSession();
+        if (!cancelled) {
+          setUser(next);
+          setDemoLoginEnabled(demoMode.enabled);
+          setDemoDataTemporary(Boolean(demoMode.temporary));
+        }
       } catch {
         if (!cancelled) setUser(null);
       } finally {
@@ -58,6 +70,13 @@ export function AuthProvider({ children }) {
       setChallenge(challengeFrom(next));
       return next;
     }
+    setChallenge(null);
+    setUser(next);
+    return next;
+  }, []);
+
+  const demoLogin = useCallback(async () => {
+    const next = await startDemoSession();
     setChallenge(null);
     setUser(next);
     return next;
@@ -97,6 +116,8 @@ export function AuthProvider({ children }) {
       user,
       loading,
       isAuthenticated: Boolean(user),
+      demoLoginEnabled,
+      demoDataTemporary,
       requires2FA: Boolean(challenge),
       challengeId: challenge ? challenge.challengeId : "",
       availableMethods: challenge ? challenge.availableMethods : [],
@@ -105,6 +126,7 @@ export function AuthProvider({ children }) {
       maskedPhone: challenge ? challenge.maskedPhone : "",
       codeSent: challenge ? challenge.codeSent : false,
       login,
+      demoLogin,
       sendOtp,
       resendOtp,
       verifyOtp,
@@ -112,7 +134,7 @@ export function AuthProvider({ children }) {
       logout,
       refreshUser,
     }),
-    [user, loading, challenge, login, sendOtp, resendOtp, verifyOtp, clearChallenge, logout, refreshUser],
+    [user, loading, demoLoginEnabled, demoDataTemporary, challenge, login, demoLogin, sendOtp, resendOtp, verifyOtp, clearChallenge, logout, refreshUser],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

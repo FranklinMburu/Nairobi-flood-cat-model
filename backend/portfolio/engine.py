@@ -15,7 +15,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-ROOT = Path(__file__).resolve().parents[2]
+from config.paths import REPO_ROOT as ROOT  # noqa: E402  (the repository root, or Vercel's copy of it)
+
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
